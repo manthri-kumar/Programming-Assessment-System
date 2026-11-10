@@ -1,0 +1,20 @@
+{
+  "schema_version": "worker-policy-v1",
+  "image": "registry.example.invalid/assessment-worker",
+  "image_digest": "REPLACE_WITH_REVIEWED_SHA256_DIGEST",
+  "network": "none",
+  "read_only_root": true,
+  "cap_drop": ["ALL"],
+  "no_new_privileges": true,
+  "user": "65532:65532",
+  "host_mounts": [],
+  "devices": [],
+  "memory_bytes": {"python": 268435456, "c": 268435456, "java": 536870912},
+  "process_count": 64,
+  "scratch_bytes": 16777216,
+  "stdout_bytes": 65536,
+  "stderr_bytes": 65536,
+  "compile_seconds": 10,
+  "test_seconds": 2,
+  "job_seconds": 120
+}

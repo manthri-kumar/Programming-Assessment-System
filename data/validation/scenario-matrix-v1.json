@@ -1,0 +1,119 @@
+{
+  "schema_version": "scenario-matrix-v1",
+  "change": "backend-core-audit",
+  "capabilities": {
+    "academic-workflow": {
+      "scenarios": ["Teacher registration authorization", "Expired or altered token", "Cross-teacher hidden-data access", "Custom rubric is evaluated", "Invalid rubric or duplicate tests", "Student history isolation", "Incomplete evaluations"],
+      "evidence": ["tests/test_api_and_persistence.py::test_expired_and_altered_tokens_are_rejected", "tests/test_api_and_persistence.py::test_teacher_registration_requires_server_invitation", "tests/test_api_and_persistence.py::test_teacher_ownership_protects_hidden_assignment_and_submission_data", "tests/test_api_and_persistence.py::test_custom_rubric_history_analytics_and_progress"]
+    },
+    "agent-interfaces": {
+      "scenarios": ["Repeat invocation", "Registry startup", "Complete handoff", "Network-disabled execution"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_registry_exposes_exactly_two_main_agents", "tests/test_analysis_and_agents.py::TwoAgentTests::test_typed_handoff_is_deterministic_and_uses_no_network"]
+    },
+    "assessment-api": {
+      "scenarios": ["Invalid payload", "Payload bounds", "Gradable submission", "Invalid student syntax", "Missing execution backend", "Contract conformance"],
+      "evidence": ["tests/test_models_and_runner.py::ModelsTests::test_request_rejects_duplicate_ids_and_invalid_weight", "tests/test_models_and_runner.py::ModelsTests::test_request_rejects_oversized_source", "tests/test_api_and_persistence.py::test_direct_assessment_uses_evaluation_agent_and_real_rubric_math", "tests/test_api_and_persistence.py::test_direct_assessment_distinguishes_student_and_infrastructure_failures"]
+    },
+    "assessment-validation": {
+      "scenarios": ["Contradictory teacher fixture", "Held-out label correction", "Required backend acceptance", "Repeat benchmark", "Bounded accuracy claim", "Fresh environment verification"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_reviewed_zero_division_fixture_uses_teacher_output", "tests/test_benchmark.py::test_corpus_rejects_inconsistent_correction_and_review_metadata", "tests/test_benchmark.py::test_repeatability_reports_decision_mismatches", "docs/backend/BENCHMARK_REVIEW.md", "docs/backend/SETUP.md"],
+      "blocked": ["Contradictory teacher fixture: independent reviewer approval is absent", "Required backend acceptance: real-worker suite has not run", "Repeat benchmark: approved held-out labels and real predictions are absent", "Bounded accuracy claim: acceptance inputs remain incomplete", "Fresh environment verification: pinned Linux worker is unavailable"]
+    },
+    "backend-architecture": {
+      "scenarios": ["Domain isolation", "Version traceability"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_typed_handoff_is_deterministic_and_uses_no_network", "tests/test_api_and_persistence.py::test_sqlite_round_trip_migration_and_redaction"]
+    },
+    "c-analysis": {
+      "scenarios": ["Keyword text", "Missing error token", "Unverified Clang worker"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_comments_and_strings_do_not_create_control_flow", "tests/test_agent_acceptance_outcomes.py::test_isolated_compile_failure_is_invalid_submission_not_a_scored_test_failure", "scripts/worker/verify-local-worker.py::c-compile"],
+      "blocked": ["Unverified Clang worker: requires the built and inspected immutable worker image"]
+    },
+    "complexity-analysis-agent": {
+      "scenarios": ["Nested loops"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_cross_language_preprocessing_and_structure_services"]
+    },
+    "concept-analysis-agent": {
+      "scenarios": ["Unlabeled failure"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_unlabelled_failures_do_not_invent_concepts"]
+    },
+    "concept-learning": {
+      "scenarios": ["Cycle or dangling edge", "Zero-division test failure", "No concept evidence", "Shared prerequisite", "Stable order and satisfied prerequisite"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_graph_validation_and_versioned_paths", "tests/test_agent_acceptance_outcomes.py::test_missing_concept_and_graph_prerequisites_produce_traceable_recommendations", "tests/test_analysis_and_agents.py::TwoAgentTests::test_unlabelled_failures_do_not_invent_concepts"]
+    },
+    "deterministic-agents": {
+      "scenarios": ["Repeated assessment", "Runtime failure feedback", "Internal stage failure", "Identical reference text"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_typed_handoff_is_deterministic_and_uses_no_network", "tests/test_agent_acceptance_outcomes.py::test_runtime_timeout_and_resource_outcomes_remain_distinct_and_deterministic", "tests/test_analysis_and_agents.py::TwoAgentTests::test_services_handle_missing_graph_fail_closed_and_complexity_limits", "tests/test_analysis_and_agents.py::TwoAgentTests::test_agent_one_preserves_rubric_score_and_agent_two_adds_feedback"]
+    },
+    "evaluation-agent": {
+      "scenarios": ["Syntax failure", "Evaluation completion", "Missing component evidence"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_syntax_failure_skips_execution_and_agent_two_reports_it", "tests/test_analysis_and_agents.py::TwoAgentTests::test_agent_one_preserves_rubric_score_and_agent_two_adds_feedback", "tests/test_agent_acceptance_outcomes.py::test_execution_unavailable_is_explicit_and_report_has_no_functional_claim"]
+    },
+    "feedback-agent": {
+      "scenarios": ["Evaluation handoff", "Failed labelled test", "Similarity heuristic", "Runner unavailable"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_feedback_agent_requires_typed_agent_one_result", "tests/test_analysis_and_agents.py::TwoAgentTests::test_agent_one_preserves_rubric_score_and_agent_two_adds_feedback", "tests/test_agent_acceptance_outcomes.py::test_execution_unavailable_is_explicit_and_report_has_no_functional_claim"]
+    },
+    "frontend-contracts": {
+      "scenarios": ["Student result view", "Unauthorized rubric change"],
+      "evidence": ["tests/test_api_and_persistence.py::test_roles_hidden_data_submission_and_blocked_evaluation", "tests/test_api_and_persistence.py::test_frontend_support_validation_and_roles"]
+    },
+    "isolated-execution": {
+      "scenarios": ["Isolation unavailable", "Host resource access attempt", "Missing local-worker trust material", "Unauthenticated control request", "Infinite loop and child process", "Output or memory flood", "Compilation hang", "Correct output then crash", "Whitespace comparison", "Repeated or overlapping jobs"],
+      "evidence": ["tests/test_models_and_runner.py::RunnerTests::test_fail_closed_runner_never_executes", "tests/test_local_worker_control.py::test_tls_worker_configuration_is_fail_closed", "tests/test_local_worker_control.py::test_hidden_expectations_never_enter_the_job_container", "tests/test_worker_protocol.py::test_overlapping_jobs_use_unique_workspaces_and_remove_them", "scripts/worker/verify-local-worker.py::real-worker-security-suite"],
+      "blocked": ["Host resource access attempt: real-worker check network-denied and host-file-denied", "Unauthenticated control request: requires deployed project CA and mTLS listener", "Infinite loop and child process: real-worker check timeout-with-child", "Output or memory flood: real-worker output/memory/PID/scratch checks", "Compilation hang: real-worker compiler deadline check", "Correct output then crash: real-worker crash-after-output check", "Repeated or overlapping jobs: real-worker concurrency and cleanup checks"]
+    },
+    "java-analysis": {
+      "scenarios": ["Unsupported layout", "Valid Java"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_c_and_java_use_language_aware_parsers", "scripts/worker/verify-local-worker.py::java-echo"],
+      "blocked": ["Valid Java: authoritative javac evidence requires the inspected worker image"]
+    },
+    "knowledge-graph-agent": {
+      "scenarios": ["Labelled functional evidence", "Contradictory concept evidence", "Invalid graph", "Agent discovery"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_graph_reasoning_and_recommendations_are_internal_to_feedback_agent", "tests/test_analysis_and_agents.py::TwoAgentTests::test_contradictory_graph_evidence_is_retained", "tests/test_analysis_and_agents.py::TwoAgentTests::test_services_handle_missing_graph_fail_closed_and_complexity_limits"]
+    },
+    "knowledge-graph": {
+      "scenarios": ["Cycle", "Shared prerequisite"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_graph_validation_and_versioned_paths", "tests/test_agent_acceptance_outcomes.py::test_missing_concept_and_graph_prerequisites_produce_traceable_recommendations"]
+    },
+    "learning-recommendation-agent": {
+      "scenarios": ["Zero-division guard"],
+      "evidence": ["tests/test_agent_acceptance_outcomes.py::test_missing_concept_and_graph_prerequisites_produce_traceable_recommendations"]
+    },
+    "normalized-ir": {
+      "scenarios": ["Formatting and renaming", "Diagnostic location"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_python_analysis_is_safe_deterministic_and_identifier_normalized", "tests/test_analysis_and_agents.py::AnalysisTests::test_bounded_ir_edit_comparison"]
+    },
+    "observability": {
+      "scenarios": ["Sanitized internal error", "Agent timeout"],
+      "evidence": ["tests/test_api_and_persistence.py::test_api_errors_are_correlated_and_sanitized", "tests/test_analysis_and_agents.py::TwoAgentTests::test_agent_one_cancellation_and_unknown_policy_skip_runner"]
+    },
+    "persistence": {
+      "scenarios": ["Replay record", "Retention expiry"],
+      "evidence": ["tests/test_api_and_persistence.py::test_assessment_record_replay_duplicate_rollback_and_retention"]
+    },
+    "program-analysis": {
+      "scenarios": ["Unsupported Java project layout", "Compiler failure without error keyword", "Toolchain missing", "Keyword inside a comment or string", "Formatting and naming changes", "Alternate correct algorithm", "Oversized parsed structure"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_c_and_java_use_language_aware_parsers", "tests/test_agent_acceptance_outcomes.py::test_isolated_compile_failure_is_invalid_submission_not_a_scored_test_failure", "tests/test_analysis_and_agents.py::AnalysisTests::test_comments_and_strings_do_not_create_control_flow", "tests/test_agent_acceptance_outcomes.py::test_alternative_valid_algorithm_keeps_behavior_and_structure_separate", "tests/test_analysis_and_agents.py::AnalysisTests::test_bounded_ir_edit_comparison"]
+    },
+    "python-analysis": {
+      "scenarios": ["Malformed source", "External import"],
+      "evidence": ["tests/test_analysis_and_agents.py::AnalysisTests::test_python_analysis_is_safe_deterministic_and_identifier_normalized", "tests/test_analysis_and_agents.py::AnalysisTests::test_python_syntax_limit_and_dependency_failures_are_explicit"]
+    },
+    "rubric-scoring": {
+      "scenarios": ["Legacy characterization", "Weighted score", "Boundary classification", "Weighted test result", "Missing structural evidence", "Empty or invalid test weights"],
+      "evidence": ["tests/test_legacy_characterization.py", "tests/test_scoring.py", "tests/test_models_and_runner.py::ModelsTests::test_request_rejects_duplicate_ids_and_invalid_weight"]
+    },
+    "structural-comparison-agent": {
+      "scenarios": ["Alternate correct algorithm"],
+      "evidence": ["tests/test_agent_acceptance_outcomes.py::test_alternative_valid_algorithm_keeps_behavior_and_structure_separate"]
+    },
+    "syntax-analysis-agent": {
+      "scenarios": ["Missing compiler"],
+      "evidence": ["tests/test_analysis_and_agents.py::TwoAgentTests::test_services_handle_missing_graph_fail_closed_and_complexity_limits"]
+    },
+    "test-execution-agent": {
+      "scenarios": ["Worker unavailable", "Timeout with descendants"],
+      "evidence": ["tests/test_models_and_runner.py::RunnerTests::test_fail_closed_runner_never_executes", "scripts/worker/verify-local-worker.py::timeout-with-child"],
+      "blocked": ["Timeout with descendants: requires the real isolated worker"]
+    }
+  }
+}

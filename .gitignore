@@ -2,3 +2,16 @@ __pycache__/
 *.exe
 *.out
 *.pyc
+.venv/
+.pytest_cache/
+*.db
+.local/worker/
+worker/*.actual.json
+worker/*.pem
+worker/*.key
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+data/private-imports/

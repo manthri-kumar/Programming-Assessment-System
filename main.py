@@ -1,82 +1,48 @@
-from modules.sedm import syntax_check
-from modules.sbcam import structure_score
-from modules.stcam import test_case_score, plagiarism_score
-from modules.feedback import generate_feedback   # ✅ NEW
-from testcases import test_cases
-from results.plot import plot_scores
-import subprocess
-import os
+"""Safe compatibility CLI for the automated assessment backend."""
+from __future__ import annotations
 
-# File paths
-teacher_file = "teacher_solution/teacher.c"
-student_file = "student_submissions/student1.c"
+import argparse
+import json
+from pathlib import Path
 
-# -------- Compile student code --------
-print("Compiling student code...")
+from backend.knowledge import load_graph
+from backend.runner import FailClosedRunner
+from backend.service import AssessmentService
 
-compile_result = subprocess.run(
-    ["gcc", student_file, "-o", "student.exe"],
-    capture_output=True,
-    text=True
-)
 
-if compile_result.returncode != 0:
-    print("Compilation Failed!")
-    print(compile_result.stderr)
-    exit()
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Assess source without unsafe host execution")
+    parser.add_argument("--language", choices=("python", "c", "java"), default="c")
+    parser.add_argument("--student", type=Path, default=Path("student_submissions/student1.c"))
+    parser.add_argument("--reference", type=Path, default=Path("teacher_solution/teacher.c"))
+    parser.add_argument("--plot", action="store_true", help="show component scores after a complete assessment")
+    return parser
 
-print("Compilation Successful!\n")
 
-# -------- Read code --------
-with open(teacher_file, "r") as f:
-    teacher_code = f.read()
+def run(language: str, student: Path, reference: Path) -> dict:
+    graph = load_graph(Path("data/concepts/concept-v1.json"))
+    service = AssessmentService(FailClosedRunner(), graph)
+    return service.assess(language, student.read_text(encoding="utf-8"), reference.read_text(encoding="utf-8"))
 
-with open(student_file, "r") as f:
-    student_code = f.read()
 
-# -------- Scores --------
-score1 = structure_score(teacher_code, student_code)
-score2 = syntax_check(student_file)
-score3 = test_case_score(["./student.exe"], test_cases)
-score4 = plagiarism_score(teacher_code, student_code)
+def plot_result(result: dict, plotter=None) -> None:
+    components = result.get("components")
+    if result.get("status") != "complete" or not components:
+        raise ValueError("plotting requires a complete assessment with component scores")
+    if plotter is None:
+        from results.plot import plot_scores
+        plotter = plot_scores
+    plotter(components)
 
-# -------- Final Score --------
-final_score = (0.2 * score1) + (0.4 * score2) + (0.2 * score3) + (0.2 * score4)
 
-# -------- Classification --------
-def classify(score):
-    if score >= 75:
-        return "Good"
-    elif score >= 50:
-        return "Average"
-    else:
-        return "Poor"
+def main() -> int:
+    args = build_parser().parse_args()
+    result = run(args.language, args.student, args.reference)
+    print(json.dumps(result, indent=2, default=str))
+    if args.plot:
+        plot_result(result)
+    return 0 if result["status"] == "complete" else 2
 
-category = classify(final_score)
 
-# -------- Feedback --------
-feedback = generate_feedback(score1, score2, score3, score4, final_score)
-
-# -------- Output --------
-print("----- RESULTS -----")
-print(f"Structure Score   : {score1:.2f}")
-print(f"Syntax Score      : {score2:.2f}")
-print(f"Test Case Score   : {score3:.2f}")
-print(f"Originality Score : {score4:.2f}")
-print(f"\nFinal Score       : {final_score:.2f}")
-print(f"Category          : {category}")
-
-# -------- Feedback Output --------
-print("\n----- FEEDBACK -----")
-for f in feedback:
-    print(f"- {f}")
-
-# -------- Graph --------
-scores = {
-    "Structure": score1,
-    "Syntax": score2,
-    "TestCases": score3,
-    "Originality": score4
-}
-
-plot_scores(scores)
+if __name__ == "__main__":
+    raise SystemExit(main())

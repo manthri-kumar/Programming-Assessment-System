@@ -1,0 +1,48 @@
+schema: spec-driven
+context: |
+  Project: Knowledge Graph-Driven Multi-Agent Framework for Intelligent Programming Assessment.
+  Backend first; frontend is out of scope until backend acceptance.
+  Agents must be deterministic and use no external LLM APIs.
+  Preserve and characterize legacy rubric weights before versioned improvements.
+  Support Python, C, and Java only through documented, tested language subsets.
+  Use isolated execution and fail closed when the isolation backend is unavailable.
+  Evaluate accuracy on reproducible labeled fixtures; do not claim universal grading accuracy.
+  backend-core-audit is approved for apply; keep verified task evidence current and do not archive without later acceptance.
+rules:
+  proposal:
+    - Inspect existing code before proposing replacements and state missing components honestly.
+  specs:
+    - Include observable success, failure, unsupported-input, and safety behaviors as applicable.
+  tasks:
+    - Order backend work by dependency and include verification for each task.
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

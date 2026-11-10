@@ -1,0 +1,18 @@
+{
+  "schema_version": "benchmark-schema-v1",
+  "corpus_version": "corpus-candidate-v2",
+  "frozen_at": "2026-10-19",
+  "label_review": {
+    "status": "pending-independent-review",
+    "reviewers": [],
+    "note": "Candidate labels must be reviewed independently before any project accuracy metric is published."
+  },
+  "cases": [
+    {"id": "py-valid-dev", "split": "development", "language": "python", "source_text": "print(1)\n", "source_sha256": "cc42155088fca5730758db72b2a5bca33112a941dfaa2d43098ec422ce4ea213", "labels": {"syntax_ok": true}},
+    {"id": "py-invalid-held", "split": "held-out", "language": "python", "source_text": "def broken(:\n", "source_sha256": "e5c39b5d9e483c96898f2970978fee4d8e5a3814e685d9ab37365a5aa333b5ad", "labels": {"syntax_ok": false}},
+    {"id": "c-valid-dev", "split": "development", "language": "c", "source_text": "int main(void){return 0;}\n", "source_sha256": "86004d65c4f387c95467c6cee92bc1f1f8cb04d6650be09fbd1e359834a56766", "labels": {"syntax_ok": true}},
+    {"id": "c-invalid-held", "split": "held-out", "language": "c", "source_text": "int main( { return 0; }\n", "source_sha256": "1b38ec72a7b46af849ffb96c725c575ade224f3e7587f3c06f96ba687ddff75e", "labels": {"syntax_ok": false}},
+    {"id": "java-valid-dev", "split": "development", "language": "java", "source_text": "class Main { public static void main(String[] args) {} }\n", "source_sha256": "b4837cb53530de9e30b0d7aefdb59976ba68fb73a9c4ad17223b9bf863e109a1", "labels": {"syntax_ok": true}},
+    {"id": "java-invalid-held", "split": "held-out", "language": "java", "source_text": "class Main { public static void main(String[] args) { }\n", "source_sha256": "a37c3f409342976311cc2142ce6a83f16bc0f7a2d10253ac33e8b20dabc7a5e6", "labels": {"syntax_ok": false}}
+  ]
+}

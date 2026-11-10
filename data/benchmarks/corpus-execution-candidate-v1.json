@@ -1,0 +1,49 @@
+{
+  "schema_version": "benchmark-schema-v1",
+  "corpus_version": "corpus-execution-candidate-v1",
+  "frozen_at": "2026-11-05",
+  "label_review": {
+    "status": "pending-independent-review",
+    "reviewers": [],
+    "note": "Supplemental syntax/runtime candidates. Labels require independent review and real isolated-worker verification before any accuracy measurement."
+  },
+  "task_contracts": {
+    "execution-classification-v1": {
+      "prompt": "Compile the submitted single-file program and execute it once with empty input. Successful exit with empty output is correct.",
+      "tests": [{"id": "empty", "input": "", "expected_output": "", "weight": 1}],
+      "concept_ids": []
+    }
+  },
+  "cases": [
+    {
+      "id": "py-syntax-error-held", "split": "held-out", "language": "python", "task_id": "execution-classification-v1", "case_kind": "syntax-error",
+      "source_text": "def broken(:\n    pass\n", "source_sha256": "6b8c8a725c23dc076d9a2c185ce4e02435746bc3b4f99906d13de360e56898c7",
+      "labels": {"syntax_ok": false, "functional_verdict": "invalid", "test_outcomes": {"empty": "compile_error"}, "structural_relation": "not-applicable", "concepts": [], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "py-runtime-error-dev", "split": "development", "language": "python", "task_id": "execution-classification-v1", "case_kind": "runtime-error",
+      "source_text": "raise RuntimeError(\"candidate\")\n", "source_sha256": "8e98106542e57da31fcaac90724d7b64a2b2e1bd4061a272cebb2239516142fb",
+      "labels": {"syntax_ok": true, "functional_verdict": "runtime-error", "test_outcomes": {"empty": "runtime_error"}, "structural_relation": "not-applicable", "concepts": [], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "c-syntax-error-held", "split": "held-out", "language": "c", "task_id": "execution-classification-v1", "case_kind": "syntax-error",
+      "source_text": "int main( { return 0; }\n", "source_sha256": "1b38ec72a7b46af849ffb96c725c575ade224f3e7587f3c06f96ba687ddff75e",
+      "labels": {"syntax_ok": false, "functional_verdict": "invalid", "test_outcomes": {"empty": "compile_error"}, "structural_relation": "not-applicable", "concepts": [], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "c-runtime-error-dev", "split": "development", "language": "c", "task_id": "execution-classification-v1", "case_kind": "runtime-error",
+      "source_text": "#include <stdlib.h>\nint main(void){return 7;}\n", "source_sha256": "483e66d5e9f1965ecc326893cfa01232d10de754bfb236652211f221fc4b935d",
+      "labels": {"syntax_ok": true, "functional_verdict": "runtime-error", "test_outcomes": {"empty": "runtime_error"}, "structural_relation": "not-applicable", "concepts": [], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "java-syntax-error-held", "split": "held-out", "language": "java", "task_id": "execution-classification-v1", "case_kind": "syntax-error",
+      "source_text": "class Main { public static void main(String[] args) { }\n", "source_sha256": "a37c3f409342976311cc2142ce6a83f16bc0f7a2d10253ac33e8b20dabc7a5e6",
+      "labels": {"syntax_ok": false, "functional_verdict": "invalid", "test_outcomes": {"empty": "compile_error"}, "structural_relation": "not-applicable", "concepts": [], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "java-runtime-error-dev", "split": "development", "language": "java", "task_id": "execution-classification-v1", "case_kind": "runtime-error",
+      "source_text": "class Main { public static void main(String[] args) { throw new RuntimeException(\"candidate\"); } }\n", "source_sha256": "a68c2047ab53fa31b5720241a125caa3ed24ded2ea2b2aeaf995656c13af041d",
+      "labels": {"syntax_ok": true, "functional_verdict": "runtime-error", "test_outcomes": {"empty": "runtime_error"}, "structural_relation": "not-applicable", "concepts": [], "recommendations": [], "score": null, "category": null}
+    }
+  ]
+}

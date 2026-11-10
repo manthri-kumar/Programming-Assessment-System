@@ -1,0 +1,18 @@
+{
+  "version": "concept-v1",
+  "concepts": [
+    {"id": "input", "label": "Input handling", "guidance": "Practice reading and validating input."},
+    {"id": "arithmetic", "label": "Arithmetic", "guidance": "Practice numeric operators and types."},
+    {"id": "conditionals", "label": "Conditionals", "guidance": "Practice guarded branches and boundary cases."},
+    {"id": "zero-division-guard", "label": "Zero-division guard", "guidance": "Check a divisor before division."},
+    {"id": "loops", "label": "Loops", "guidance": "Practice bounded iteration."},
+    {"id": "functions", "label": "Functions", "guidance": "Practice decomposition and return values."}
+  ],
+  "requires": {
+    "arithmetic": ["input"],
+    "conditionals": ["input"],
+    "zero-division-guard": ["arithmetic", "conditionals"],
+    "loops": ["conditionals"],
+    "functions": ["input"]
+  }
+}

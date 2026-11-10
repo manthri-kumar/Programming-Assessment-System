@@ -1,0 +1,17 @@
+version: 0.1
+log:
+  level: warn
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: false
+http:
+  addr: 127.0.0.1:5000
+  tls:
+    certificate: /run/registry/tls/registry.pem
+    key: /run/registry/tls/registry.key
+auth:
+  htpasswd:
+    realm: assessment-worker-registry
+    path: /run/registry/auth/htpasswd

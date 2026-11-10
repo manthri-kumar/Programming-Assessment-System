@@ -1,0 +1,19 @@
+{
+  "version": "agent-expected-outcomes-v1",
+  "label_status": "pending-independent-review",
+  "reviewer": null,
+  "purpose": "Externalized candidate acceptance labels for deterministic agent integration. These labels are not accuracy results until an independent reviewer signs them.",
+  "cases": [
+    {"id": "correct", "scenario": "correct_program", "expected": {"assessment_status": "complete", "test_score": 100.0}},
+    {"id": "incorrect", "scenario": "incorrect_program", "expected": {"assessment_status": "complete", "test_score": 0.0}},
+    {"id": "partial", "scenario": "partially_correct_program", "expected": {"assessment_status": "complete", "test_score": 50.0}},
+    {"id": "syntax", "scenario": "syntax_error", "expected": {"assessment_status": "invalid_submission", "total": null, "execution_status": "skipped"}},
+    {"id": "concept", "scenario": "missing_concept", "expected": {"concept_status": "absent", "recommendation_required": true}},
+    {"id": "alternative", "scenario": "alternative_valid_algorithm", "expected": {"assessment_status": "complete", "test_score": 100.0, "structure_may_differ": true}},
+    {"id": "structure", "scenario": "incorrect_structure", "expected": {"structural_relation": "different"}},
+    {"id": "complexity", "scenario": "unsupported_complexity_case", "expected": {"recursion": null, "unsupported_indicator": "recursion"}},
+    {"id": "prerequisite", "scenario": "graph_prerequisite_recommendation", "expected": {"order": ["input", "arithmetic", "conditionals", "zero-division-guard"]}},
+    {"id": "contradiction", "scenario": "contradictory_agent_evidence", "expected": {"assessment_status": "invalid_evidence", "total": null}},
+    {"id": "unavailable", "scenario": "execution_unavailable", "expected": {"assessment_status": "incomplete", "total": null, "execution_status": "unavailable"}}
+  ]
+}

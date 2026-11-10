@@ -1,0 +1,84 @@
+{
+  "schema_version": "benchmark-schema-v1",
+  "corpus_version": "corpus-candidate-v3",
+  "frozen_at": "2026-10-25",
+  "label_review": {
+    "status": "pending-independent-review",
+    "reviewers": [],
+    "note": "Candidate labels were authored for review and must not be used to publish accuracy before independent approval."
+  },
+  "task_contracts": {
+    "sum-to-n-v1": {
+      "prompt": "Read one integer n. Print the sum 1 through n; print 0 when n is zero or negative.",
+      "tests": [
+        {"id": "positive", "input": "5\n", "expected_output": "15\n", "weight": 2},
+        {"id": "one", "input": "1\n", "expected_output": "1\n", "weight": 1},
+        {"id": "zero", "input": "0\n", "expected_output": "0\n", "weight": 1},
+        {"id": "negative", "input": "-3\n", "expected_output": "0\n", "weight": 1}
+      ],
+      "concept_ids": ["input", "output", "conditionals", "loops", "arithmetic"]
+    }
+  },
+  "cases": [
+    {
+      "id": "py-sum-correct-dev", "split": "development", "language": "python", "task_id": "sum-to-n-v1", "case_kind": "correct",
+      "source_text": "n = int(input())\nprint(sum(range(1, n + 1)) if n > 0 else 0)\n", "source_sha256": "b516c049b7fd9728f404ff616f9d2887c3223f9d021f72f38d5b81cbe7fc58cf",
+      "labels": {"syntax_ok": true, "functional_verdict": "correct", "test_outcomes": {"positive": "passed", "one": "passed", "zero": "passed", "negative": "passed"}, "structural_relation": "alternative-valid", "concepts": ["input", "output", "conditionals", "arithmetic"], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "py-sum-partial-held", "split": "held-out", "language": "python", "task_id": "sum-to-n-v1", "case_kind": "partially-correct",
+      "source_text": "n = int(input())\nprint(sum(range(1, n)) if n > 0 else 0)\n", "source_sha256": "c843d9861a9cdd435e358e4c4135b1fdaf09a8f9fd675737d202882384487a18",
+      "labels": {"syntax_ok": true, "functional_verdict": "partial", "test_outcomes": {"positive": "wrong_output", "one": "wrong_output", "zero": "passed", "negative": "passed"}, "structural_relation": "near-reference", "concepts": ["loops", "arithmetic"], "recommendations": ["loops"], "score": null, "category": null}
+    },
+    {
+      "id": "py-sum-incorrect-dev", "split": "development", "language": "python", "task_id": "sum-to-n-v1", "case_kind": "incorrect",
+      "source_text": "n = int(input())\nprint(n * n)\n", "source_sha256": "7d8469d62db263a5af389e59ababaeeb8e13b77e955d24cc56e66bd304260750",
+      "labels": {"syntax_ok": true, "functional_verdict": "incorrect", "test_outcomes": {"positive": "wrong_output", "one": "passed", "zero": "passed", "negative": "wrong_output"}, "structural_relation": "different", "concepts": ["conditionals", "loops", "arithmetic"], "recommendations": ["conditionals", "loops"], "score": null, "category": null}
+    },
+    {
+      "id": "py-sum-boundary-held", "split": "held-out", "language": "python", "task_id": "sum-to-n-v1", "case_kind": "boundary-correct",
+      "source_text": "n = int(input())\ntotal = 0\nwhile n > 0:\n    total += n\n    n -= 1\nprint(total)\n", "source_sha256": "2e6e8812f5ee5f555453294095d85e551fe3250f3c511391ca560cc46d7c8df1",
+      "labels": {"syntax_ok": true, "functional_verdict": "correct", "test_outcomes": {"positive": "passed", "one": "passed", "zero": "passed", "negative": "passed"}, "structural_relation": "alternative-valid", "concepts": ["input", "output", "conditionals", "loops", "arithmetic"], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "c-sum-correct-dev", "split": "development", "language": "c", "task_id": "sum-to-n-v1", "case_kind": "correct",
+      "source_text": "#include <stdio.h>\nint main(void){long n,total=0;if(scanf(\"%ld\",&n)!=1)return 1;for(long i=1;i<=n;i++)total+=i;printf(\"%ld\\n\",total);return 0;}\n", "source_sha256": "1c452702228a0b737a7c0a04f7e773a89b7f68b0075a775629ebec3028bccd18",
+      "labels": {"syntax_ok": true, "functional_verdict": "correct", "test_outcomes": {"positive": "passed", "one": "passed", "zero": "passed", "negative": "passed"}, "structural_relation": "reference-like", "concepts": ["input", "output", "loops", "arithmetic"], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "c-sum-partial-held", "split": "held-out", "language": "c", "task_id": "sum-to-n-v1", "case_kind": "partially-correct",
+      "source_text": "#include <stdio.h>\nint main(void){int n,total=0;scanf(\"%d\",&n);for(int i=1;i<n;i++)total+=i;printf(\"%d\\n\",total);return 0;}\n", "source_sha256": "c6e46f1673db01cb43d6c95b247a0bee647442cdae817833564ca92cf6642ef0",
+      "labels": {"syntax_ok": true, "functional_verdict": "partial", "test_outcomes": {"positive": "wrong_output", "one": "wrong_output", "zero": "passed", "negative": "passed"}, "structural_relation": "near-reference", "concepts": ["loops", "arithmetic"], "recommendations": ["loops"], "score": null, "category": null}
+    },
+    {
+      "id": "c-sum-incorrect-dev", "split": "development", "language": "c", "task_id": "sum-to-n-v1", "case_kind": "incorrect",
+      "source_text": "#include <stdio.h>\nint main(void){int n;scanf(\"%d\",&n);printf(\"%d\\n\",n*n);return 0;}\n", "source_sha256": "c0681b5a35934b72333afccdb8ed0918b523e11980f1e046db143de7ef5ab369",
+      "labels": {"syntax_ok": true, "functional_verdict": "incorrect", "test_outcomes": {"positive": "wrong_output", "one": "passed", "zero": "passed", "negative": "wrong_output"}, "structural_relation": "different", "concepts": ["conditionals", "loops", "arithmetic"], "recommendations": ["conditionals", "loops"], "score": null, "category": null}
+    },
+    {
+      "id": "c-sum-boundary-held", "split": "held-out", "language": "c", "task_id": "sum-to-n-v1", "case_kind": "boundary-correct",
+      "source_text": "#include <stdio.h>\nint main(void){long n;scanf(\"%ld\",&n);long total=0;while(n>0){total+=n--;}printf(\"%ld\\n\",total);return 0;}\n", "source_sha256": "aa5bd060b391717cabba5dfbb52d6976e2708ca08c578fc6a90a851c84a35900",
+      "labels": {"syntax_ok": true, "functional_verdict": "correct", "test_outcomes": {"positive": "passed", "one": "passed", "zero": "passed", "negative": "passed"}, "structural_relation": "alternative-valid", "concepts": ["input", "output", "conditionals", "loops", "arithmetic"], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "java-sum-correct-dev", "split": "development", "language": "java", "task_id": "sum-to-n-v1", "case_kind": "correct",
+      "source_text": "import java.util.Scanner;\nclass Main { public static void main(String[] args){ Scanner s=new Scanner(System.in); long n=s.nextLong(), total=0; for(long i=1;i<=n;i++) total+=i; System.out.println(total); } }\n", "source_sha256": "c047b4971f95bd12253bb4ac8d2a0b7fda2baaff450fb1272e510a5b15ddd811",
+      "labels": {"syntax_ok": true, "functional_verdict": "correct", "test_outcomes": {"positive": "passed", "one": "passed", "zero": "passed", "negative": "passed"}, "structural_relation": "reference-like", "concepts": ["input", "output", "loops", "arithmetic"], "recommendations": [], "score": null, "category": null}
+    },
+    {
+      "id": "java-sum-partial-held", "split": "held-out", "language": "java", "task_id": "sum-to-n-v1", "case_kind": "partially-correct",
+      "source_text": "import java.util.Scanner;\nclass Main { public static void main(String[] args){ Scanner s=new Scanner(System.in); int n=s.nextInt(), total=0; for(int i=1;i<n;i++) total+=i; System.out.println(total); } }\n", "source_sha256": "27808460ab665dc829d1d2ef4726314bc4091b4189c52552e5bce7fd577f4470",
+      "labels": {"syntax_ok": true, "functional_verdict": "partial", "test_outcomes": {"positive": "wrong_output", "one": "wrong_output", "zero": "passed", "negative": "passed"}, "structural_relation": "near-reference", "concepts": ["loops", "arithmetic"], "recommendations": ["loops"], "score": null, "category": null}
+    },
+    {
+      "id": "java-sum-incorrect-dev", "split": "development", "language": "java", "task_id": "sum-to-n-v1", "case_kind": "incorrect",
+      "source_text": "import java.util.Scanner;\nclass Main { public static void main(String[] args){ int n=new Scanner(System.in).nextInt(); System.out.println(n*n); } }\n", "source_sha256": "9c77aa510ff52c0aba8a340c1070198e97c49ec387d45455dfc06808349391c3",
+      "labels": {"syntax_ok": true, "functional_verdict": "incorrect", "test_outcomes": {"positive": "wrong_output", "one": "passed", "zero": "passed", "negative": "wrong_output"}, "structural_relation": "different", "concepts": ["conditionals", "loops", "arithmetic"], "recommendations": ["conditionals", "loops"], "score": null, "category": null}
+    },
+    {
+      "id": "java-sum-boundary-held", "split": "held-out", "language": "java", "task_id": "sum-to-n-v1", "case_kind": "boundary-correct",
+      "source_text": "import java.io.*;\nclass Main { public static void main(String[] args) throws Exception { long n=Long.parseLong(new BufferedReader(new InputStreamReader(System.in)).readLine()); long total=0; while(n>0){total+=n--;}; System.out.println(total); } }\n", "source_sha256": "49014dc294a5c281de7ade33a3708a618a7b47e4cf45fde30d0c2817218f9d42",
+      "labels": {"syntax_ok": true, "functional_verdict": "correct", "test_outcomes": {"positive": "passed", "one": "passed", "zero": "passed", "negative": "passed"}, "structural_relation": "alternative-valid", "concepts": ["input", "output", "conditionals", "loops", "arithmetic"], "recommendations": [], "score": null, "category": null}
+    }
+  ]
+}

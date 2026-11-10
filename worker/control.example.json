@@ -1,0 +1,20 @@
+{
+  "schema_version": "worker-control-v1",
+  "listen_host": "127.0.0.1",
+  "listen_port": 9443,
+  "podman": "/usr/bin/podman",
+  "image": "localhost:5000/assessment/worker",
+  "image_digest": "REPLACE_WITH_VERIFIED_SHA256_DIGEST",
+  "seccomp_profile": "/usr/share/containers/seccomp.json",
+  "seccomp_sha256": "REPLACE_WITH_VERIFIED_SECCOMP_SHA256",
+  "tls": {
+    "ca_certificate": "/home/assessment-worker/.config/assessment-worker/pki/ca.pem",
+    "server_certificate": "/home/assessment-worker/.config/assessment-worker/pki/server.pem",
+    "server_private_key": "/home/assessment-worker/.config/assessment-worker/pki/server.key"
+  },
+  "expected_toolchains": {
+    "python": "3.11.2-6+deb12u9",
+    "clang": "1:14.0.6-12",
+    "java": "17.0.21+9-1~deb12u1"
+  }
+}

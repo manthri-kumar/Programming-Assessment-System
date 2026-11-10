@@ -1,0 +1,12 @@
+{
+  "schema_version": "worker-client-v1",
+  "endpoint": "https://127.0.0.1:9443",
+  "server_name": "127.0.0.1",
+  "image": "localhost:5000/assessment/worker",
+  "image_digest": "REPLACE_WITH_VERIFIED_SHA256_DIGEST",
+  "tls": {
+    "ca_certificate": "/home/assessment-api/.config/assessment-worker/pki/ca.pem",
+    "client_certificate": "/home/assessment-api/.config/assessment-worker/pki/client.pem",
+    "client_private_key": "/home/assessment-api/.config/assessment-worker/pki/client.key"
+  }
+}

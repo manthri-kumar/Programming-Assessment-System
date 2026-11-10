@@ -1,0 +1,19 @@
+{
+  "policy_version": "legacy-v1",
+  "weights": {"structure": 0.2, "syntax": 0.4, "tests": 0.2, "originality": 0.2},
+  "categories": {"good_minimum": 75, "average_minimum": 50},
+  "goldens": {
+    "zero_reference_matching": 100.0,
+    "zero_reference_extra": 0.0,
+    "two_error_tokens": 80,
+    "no_error_token_even_nonzero_exit": 100,
+    "weighted_one_of_four": 25.0,
+    "core_sample_total": 74.0,
+    "core_sample_category": "Average"
+  },
+  "known_limitations": [
+    "legacy syntax counts lowercase error tokens and ignores compiler exit status",
+    "legacy tests compare stripped stdout and ignore process exit status",
+    "text dissimilarity is a heuristic and is not evidence of misconduct"
+  ]
+}

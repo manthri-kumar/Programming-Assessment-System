@@ -1,0 +1,13 @@
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { useAuth } from '../auth/AuthProvider'
+import { LoadingPage } from '../components/ui'
+import { AppShell } from './Shell'
+import { AuthPage } from '../pages/AuthPage'
+import { AssignmentDetailPage, AssignmentListPage, BookmarksPage, LearningPage, ProgressPage, SettingsPage, StudentDashboard, SubmissionDetailPage, SubmissionsPage, WorkspacePage } from '../pages/student'
+import { AssignmentFormPage, TeacherAssignments, TeacherDashboard, TeacherSettings, TeacherSubmissions } from '../pages/teacher'
+import type { Role } from '../api/types'
+
+function Guard({ role, children }: { role: Role; children: ReactNode }) { const { user, loading } = useAuth(); const location = useLocation(); if (loading) return <LoadingPage/>; if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace/>; if (user.role !== role) return <Navigate to={`/${user.role}`} replace/>; return children }
+export default function App(){return <Routes><Route path="/login" element={<AuthPage/>}/><Route path="/register" element={<AuthPage/>}/><Route element={<Guard role="student"><AppShell/></Guard>}><Route path="/student" element={<StudentDashboard/>}/><Route path="/student/assignments" element={<AssignmentListPage/>}/><Route path="/student/assignments/:id" element={<AssignmentDetailPage/>}/><Route path="/student/assignments/:id/workspace" element={<WorkspacePage/>}/><Route path="/student/submissions" element={<SubmissionsPage/>}/><Route path="/student/submissions/:id" element={<SubmissionDetailPage/>}/><Route path="/student/progress" element={<ProgressPage/>}/><Route path="/student/bookmarks" element={<BookmarksPage/>}/><Route path="/student/recommended" element={<AssignmentListPage recommended/>}/><Route path="/student/learning" element={<LearningPage/>}/><Route path="/student/settings" element={<SettingsPage/>}/></Route><Route element={<Guard role="teacher"><AppShell/></Guard>}><Route path="/teacher" element={<TeacherDashboard/>}/><Route path="/teacher/assignments" element={<TeacherAssignments/>}/><Route path="/teacher/assignments/new" element={<AssignmentFormPage/>}/><Route path="/teacher/assignments/:id/edit" element={<AssignmentFormPage/>}/><Route path="/teacher/submissions" element={<TeacherSubmissions/>}/><Route path="/teacher/submissions/:id" element={<SubmissionDetailPage/>}/><Route path="/teacher/settings" element={<TeacherSettings/>}/></Route><Route path="/" element={<HomeRedirect/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes>}
+function HomeRedirect(){const {user,loading}=useAuth();if(loading)return <LoadingPage/>;return <Navigate to={user?`/${user.role}`:'/login'} replace/>}

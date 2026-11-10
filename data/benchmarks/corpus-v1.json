@@ -1,0 +1,29 @@
+{
+  "corpus_version": "corpus-v1",
+  "schema_version": "benchmark-schema-v1",
+  "label_review": {
+    "status": "pending-independent-review",
+    "reviewers": [],
+    "note": "Expected output was reconciled against the teacher source; an independent reviewer has not signed the label."
+  },
+  "corrections": [
+    {
+      "case_id": "c-arithmetic-zero-divisor-v1",
+      "old_expected_output": "Error\n",
+      "new_expected_output": "5\n5\n0\nError\n",
+      "reason": "The teacher program prints sum, difference and product before the guarded division result."
+    }
+  ],
+  "cases": [
+    {
+      "id": "c-arithmetic-zero-divisor-v1",
+      "split": "development",
+      "language": "c",
+      "input": "5 0\n",
+      "expected_output": "5\n5\n0\nError\n",
+      "source": "teacher_solution/teacher.c",
+      "source_sha256": "619f01e0b52190b757cba00d6fd28e47d64bcfd2bed901d3b565dabcf2ec7729",
+      "rationale": "Matches the teacher program: sum, difference, product, then guarded division output."
+    }
+  ]
+}

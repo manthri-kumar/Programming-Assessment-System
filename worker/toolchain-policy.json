@@ -1,0 +1,28 @@
+{
+  "schema_version": "toolchain-policy-v1",
+  "checked_at": "2026-10-25",
+  "architecture": "linux/amd64",
+  "base_image_candidate": "docker.io/library/debian:bookworm-20261005-slim",
+  "base_image_digest": null,
+  "base_image_status": "digest-must-be-resolved-and-recorded-on-worker",
+  "debian_snapshot": null,
+  "debian_security_snapshot": null,
+  "packages": {
+    "python3.11": {
+      "debian_version": "3.11.2-6+deb12u9",
+      "upstream_patch": "3.11.2",
+      "provenance": "https://packages.debian.org/bookworm/python3.11"
+    },
+    "clang-14": {
+      "debian_version": "1:14.0.6-12",
+      "upstream_patch": "14.0.6",
+      "provenance": "https://packages.debian.org/bookworm/clang-14"
+    },
+    "openjdk-17-jdk-headless": {
+      "debian_version": "17.0.21+9-1~deb12u1",
+      "upstream_patch": "17.0.21+9",
+      "provenance": "https://packages.debian.org/bookworm/openjdk-17-jdk-headless"
+    }
+  },
+  "verification_status": "selected-from-official-metadata-not-yet-built-or-inspected"
+}
