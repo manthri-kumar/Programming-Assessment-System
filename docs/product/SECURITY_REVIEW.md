@@ -1,6 +1,6 @@
 # Security and privacy review
 
-Evidence date: 2026-11-09
+Evidence date: 2026-11-10
 
 ## Verified by code and automated tests
 
@@ -24,10 +24,10 @@ WSL2 Ubuntu was observed on 2026-11-08 with a non-root user and Linux kernel `6.
 
 - `python -m pip check`: no broken requirements.
 - `npm audit --offline`: 0 known vulnerabilities in the installed lockfile data.
-- Backend regression suite: 138 passed.
-- Frontend component suite: 44 passed; TypeScript, ESLint, and production build passed.
-- Browser suite: 18 passed against a disposable local API/database using system Chrome.
-- Strict OpenSpec validation: 5 changes passed, 0 failed.
+- Backend regression suite: 222 passed.
+- Frontend component suite: 61 passed; TypeScript, ESLint, and production build passed.
+- Browser suite: 21 passed against a disposable local API/database using system Chrome.
+- Strict OpenSpec validation: 6 changes passed, 0 failed.
 
 These checks do not prove container containment. Fake-runner tests prove deterministic application behavior only and are not real worker evidence.
 

@@ -463,7 +463,7 @@ def test_custom_rubric_history_analytics_and_progress(tmp_path):
 
 def test_sqlite_round_trip_migration_and_redaction(tmp_path):
     repository = SQLiteRepository(tmp_path / "roundtrip.db")
-    assert repository.schema_version() == 7
+    assert repository.schema_version() == 8
     user = repository.create_user("student@example.test", hash_password("password123"), "student")
     teacher = repository.create_user("teacher@example.test", hash_password("password123"), "teacher")
     assignment = repository.create_assignment(teacher["id"], {"title": "A", "description": "", "language": "python", "rubric": {"policy_version": "core-v1"}, "reference_source": "pass", "tests": []})
@@ -682,6 +682,30 @@ def test_audit_log_redacts_sensitive_fields_and_preserves_evidence():
     payload = json.loads(serialized)
     assert payload["details"] == {"authorization": "[REDACTED]", "count": 2, "source": "[REDACTED]"}
     assert payload["evidence_ids"] == ["evidence-1"]
+
+
+def test_audit_log_redacts_assignment_import_content_and_provider_secrets():
+    sensitive = {
+        "document_bytes": "private bytes",
+        "extracted_text": "faculty question",
+        "reference_source": "private solution",
+        "hidden_tests": [{"input": "secret case"}],
+        "prompt": "provider prompt",
+        "raw_provider_response": {"text": "raw result"},
+        "path": "C:/private/import.png",
+        "storage_key": "opaque-private-key",
+        "token": "access-token",
+        "credentials": {"api_key": "super-sensitive-api-value"},
+    }
+    serialized = AuditLogger().serialize(AuditEvent(
+        "request-2", "assignment_import", "invalid_file_type", details={**sensitive, "teacher_id": 7, "byte_size": 128},
+    ))
+    for secret in ("private bytes", "faculty question", "private solution", "secret case", "provider prompt", "raw result", "C:/private", "opaque-private-key", "access-token", "super-sensitive-api-value"):
+        assert secret not in serialized
+    payload = json.loads(serialized)
+    assert payload["details"]["teacher_id"] == 7
+    assert payload["details"]["byte_size"] == 128
+    assert all(payload["details"][key] == "[REDACTED]" for key in sensitive)
 
 
 def test_frontend_support_contracts_are_scoped_and_do_not_execute(tmp_path):

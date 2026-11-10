@@ -75,8 +75,7 @@ def language_commands(language: str, workspace: Path) -> tuple[str, tuple[str, .
 
 
 def _terminate_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
+    # Descendants can outlive the group leader and keep its pipes/workspace open.
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -84,25 +83,30 @@ def _terminate_group(process: subprocess.Popen[bytes]) -> None:
     process.wait(timeout=1)
 
 
-def capture_process(command: tuple[str, ...], workspace: Path, stdin: str, timeout: float, output_limit: int) -> dict[str, Any]:
+def capture_process(command: tuple[str, ...], workspace: Path, stdin: str, timeout: float, output_limit: int, *, environment: dict[str, str] | None = None) -> dict[str, Any]:
     process = subprocess.Popen(
         command,
         cwd=workspace,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "HOME": "/nonexistent", "TMPDIR": "/work"},
+        env=environment if environment is not None else {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "HOME": "/nonexistent", "TMPDIR": "/work"},
         start_new_session=True,
     )
     assert process.stdin and process.stdout and process.stderr
+    selector = selectors.DefaultSelector()
+    deadline = time.monotonic() + timeout
     try:
-        process.stdin.write(stdin.encode("utf-8"))
-        process.stdin.close()
-        selector = selectors.DefaultSelector()
+        pending_input = memoryview(stdin.encode("utf-8"))
+        for stream in (process.stdin, process.stdout, process.stderr):
+            os.set_blocking(stream.fileno(), False)
+        if pending_input:
+            selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+        else:
+            process.stdin.close()
         selector.register(process.stdout, selectors.EVENT_READ, "stdout")
         selector.register(process.stderr, selectors.EVENT_READ, "stderr")
         streams = {"stdout": bytearray(), "stderr": bytearray()}
-        deadline = time.monotonic() + timeout
         exceeded = False
         while selector.get_map():
             remaining = deadline - time.monotonic()
@@ -110,10 +114,23 @@ def capture_process(command: tuple[str, ...], workspace: Path, stdin: str, timeo
                 _terminate_group(process)
                 return {"status": "timeout", "stdout": _decode(streams["stdout"]), "stderr": _decode(streams["stderr"]), "exit_code": None}
             events = selector.select(min(remaining, 0.1))
-            if not events and process.poll() is not None:
-                events = [(key, selectors.EVENT_READ) for key in selector.get_map().values()]
             for key, _ in events:
-                chunk = key.fileobj.read1(8192)
+                if key.data == "stdin":
+                    try:
+                        written = os.write(key.fileobj.fileno(), pending_input[:8192])
+                        pending_input = pending_input[written:]
+                    except BrokenPipeError:
+                        pending_input = pending_input[:0]
+                    except BlockingIOError:
+                        continue
+                    if not pending_input:
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                    continue
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 8192)
+                except BlockingIOError:
+                    continue
                 if not chunk:
                     selector.unregister(key.fileobj)
                     continue
@@ -124,14 +141,23 @@ def capture_process(command: tuple[str, ...], workspace: Path, stdin: str, timeo
             if exceeded:
                 _terminate_group(process)
                 return {"status": "resource_limit", "stdout": _decode(streams["stdout"]), "stderr": _decode(streams["stderr"]), "exit_code": None}
-        exit_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+        try:
+            exit_code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            return {"status": "timeout", "stdout": _decode(streams["stdout"]), "stderr": _decode(streams["stderr"]), "exit_code": None}
         return {"status": "completed", "stdout": _decode(streams["stdout"]), "stderr": _decode(streams["stderr"]), "exit_code": exit_code}
     finally:
-        _terminate_group(process)
+        try:
+            _terminate_group(process)
+        finally:
+            selector.close()
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
 
 
 def _decode(value: bytearray) -> str:
-    return bytes(value).decode("utf-8", errors="replace")
+    # Replacement characters must not expand the output beyond its byte budget.
+    return bytes(value).decode("utf-8", errors="replace").encode("utf-8")[:len(value)].decode("utf-8", errors="ignore")
 
 
 ProcessExecutor = Callable[[tuple[str, ...], Path, str, float, int], dict[str, Any]]

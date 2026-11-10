@@ -33,3 +33,13 @@ The verification command checks real Python/C/Java echo programs, compile failur
 ## Unverified controls
 
 No image was built or pulled, no local registry or control service was started, no certificate was generated, and no student source was executed in this session. Kernel containment, cgroup classification, process-tree termination, scratch/PID exhaustion, concurrent isolation, and cleanup therefore remain unverified. The checked-in examples contain invalid digest placeholders and fail closed.
+
+## Local verification on 2026-11-10
+
+Read-only WSL inspection found an Ubuntu WSL2 distribution, kernel `6.6.87.2-microsoft-standard-WSL2`, running as UID 1000. `/usr/bin/python3` and `/usr/bin/openssl` exist; `podman`, `clang-14`, and `javac` are absent. No packages, certificates, images, registry, or host-security changes were installed/applied. Real Python 3.11, C11, and Java 17 worker execution is **BLOCKED**.
+
+The control/entrypoint implementation was corrected to keep container stdin attached, transfer input without blocking the deadline, bound control response capture while streaming, kill the process group even after its parent exits, close capture descriptors, preserve the dedicated Podman account's runtime environment, require rootless cgroup-v2 CPU/memory/PID controls, and reject grading evidence when cleanup fails or a successful case lacks a zero exit code. The UTF-8 sanitizer cannot expand captured streams beyond the configured byte bound.
+
+Environment-independent verification: `python -m pytest tests/test_worker_protocol.py tests/test_local_worker_control.py tests/test_container_runner_contract.py tests/test_worker_configuration.py -q` passed **45 tests**. Process adapters are intercepted in these tests; they establish contract behavior, not real containment. The real verifier now also includes full-size unread stdin and a child whose parent exits before the child. Resource classification, kernel isolation, certificate identity authorization, and all real execution gates remain unverified until the approved runtime and immutable image exist.
+
+Next provisioning action requires separate administrator approval for trusted Ubuntu rootless-Podman dependencies and a dedicated worker account/registry. After provisioning, resolve and record the base digest and snapshot timestamps, build the image with the existing script, record its registry digest, prepare private mTLS material and hash-pinned seccomp configuration, and run `python scripts/worker/verify-local-worker.py --config .local/worker/client.actual.json`. Keep `ASSESSMENT_WORKER_CONFIG` unset until this configuration is reviewed and real verification passes.

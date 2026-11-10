@@ -112,3 +112,13 @@ def test_policy_rejects_nonpositive_server_limits():
     from backend.runner import ExecutionLimits
     with pytest.raises(ValueError, match="execution limits"):
         ContainerPolicy("example/worker", DIGEST, limits=ExecutionLimits(test_seconds=0)).validate()
+
+
+@pytest.mark.parametrize("status", ["passed", "wrong_output"])
+@pytest.mark.parametrize("exit_code", [None, 2])
+def test_worker_cannot_return_gradable_output_with_unproven_success(status, exit_code):
+    import json
+    job = ContainerJob("a" * 32, "python", "print(1)", "", ({"id": "case", "weight": 1},))
+    response = {"job_id": job.id, "outcomes": [{"case_id": "case", "status": status, "stdout": "1", "exit_code": exit_code, "weight": 1}]}
+    with pytest.raises(RunnerUnavailable, match="zero exit"):
+        parse_worker_response(json.dumps(response).encode(), job, ContainerPolicy("example/worker", DIGEST))

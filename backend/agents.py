@@ -18,7 +18,7 @@ from backend.languages.python import analyze as analyze_python
 from backend.languages.c import analyze as analyze_c
 from backend.languages.java import analyze as analyze_java
 from backend.observability import AuditEvent, AuditLogger
-from backend.runner import FailClosedRunner, RunnerUnavailable, SubmissionRunner
+from backend.runner import FailClosedRunner, RunnerUnavailable, RunStatus, SubmissionRunner
 from backend.scoring import compose_total, legacy_originality_score, resolve_weights, weighted_test_score
 
 
@@ -162,6 +162,8 @@ class CodePreprocessingService:
         result = _analyze_language(context.language, context.source)
         if result is None:
             return ServiceResult(self.name, "unavailable", diagnostics=("language adapter unavailable",), service_version=self.version)
+        if any(message.startswith("analysis_limit:") for message in result.diagnostics):
+            return ServiceResult(self.name, "analysis_limit", diagnostics=result.diagnostics, service_version=self.version)
         if getattr(result, "support_status", "supported") == "unsupported":
             return ServiceResult(self.name, "unsupported", diagnostics=result.diagnostics, ir=result.ir, service_version=self.version)
         if not result.syntax_ok or result.ir is None:
@@ -178,6 +180,8 @@ class SyntaxAnalysisService:
         result = _analyze_language(context.language, context.source)
         if result is None:
             return ServiceResult(self.name, "unavailable", diagnostics=("language adapter unavailable",), service_version=self.version)
+        if any(message.startswith("analysis_limit:") for message in result.diagnostics):
+            return ServiceResult(self.name, "analysis_limit", diagnostics=result.diagnostics, service_version=self.version)
         if getattr(result, "support_status", "supported") == "unsupported":
             return ServiceResult(self.name, "unsupported", diagnostics=result.diagnostics, ir=result.ir, service_version=self.version)
         evidence = (canonical_hash(result.ir),) if result.ir else ()
@@ -262,7 +266,7 @@ class StructuralComparisonService:
 
 class ComplexityAnalysisService:
     name = "complexity-analysis"
-    version = "2"
+    version = "3"
 
     def run(self, context: AgentContext) -> ServiceResult:
         analysis = _analyze_language(context.language, context.source)
@@ -286,15 +290,54 @@ class ComplexityAnalysisService:
         unsupported: list[str] = []
         if context.language == "python":
             tree = ast.parse(context.source)
-            definitions = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-            recursion = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in definitions for node in ast.walk(tree))
+            definitions = {node.name: node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            calls: dict[str, set[str]] = {name: set() for name in definitions}
+
+            class Calls(ast.NodeVisitor):
+                def __init__(self, owner: str) -> None:
+                    self.owner = owner
+
+                def visit_Call(self, node: ast.Call) -> None:
+                    if isinstance(node.func, ast.Name) and node.func.id in definitions:
+                        calls[self.owner].add(node.func.id)
+                    self.generic_visit(node)
+
+                def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                    unsupported.append("nested-function-recursion")
+
+                visit_AsyncFunctionDef = visit_FunctionDef
+
+                def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                    unsupported.append("method-recursion")
+
+            for name, definition in definitions.items():
+                visitor = Calls(name)
+                for statement in definition.body:
+                    visitor.visit(statement)
+            visiting: set[str] = set()
+            visited: set[str] = set()
+
+            def cyclic(name: str) -> bool:
+                if name in visiting:
+                    return True
+                if name in visited:
+                    return False
+                visiting.add(name)
+                found = any(cyclic(target) for target in sorted(calls[name]))
+                visiting.remove(name)
+                visited.add(name)
+                return found
+
+            recursion = any(cyclic(name) for name in sorted(definitions))
+            if any(isinstance(node, ast.ClassDef) for node in tree.body):
+                unsupported.append("method-recursion")
         else:
             unsupported.append("recursion")
         estimate = "constant" if max_depth == 0 else "linear" if max_depth == 1 else f"polynomial-upper-bound-n^{max_depth}"
         return ServiceResult(self.name, "complete", evidence=(canonical_hash(analysis.ir),), payload={
             "estimate": estimate, "loop_nesting": max_depth, "loop_locations": sorted(set(loop_locations)),
-            "recursion": recursion, "unsupported_indicators": unsupported, "ir_nodes": node_count(analysis.ir),
-            "metric_version": "complexity-static-v2", "limitation": "static structural estimate; data-dependent bounds are not inferred",
+            "recursion": recursion, "unsupported_indicators": sorted(set(unsupported)), "ir_nodes": node_count(analysis.ir),
+            "metric_version": "complexity-static-v3", "limitation": "static structural estimate; data-dependent bounds and dynamic call targets are not inferred",
         }, service_version=self.version)
 
 
@@ -312,6 +355,8 @@ class SecureTestExecutionService:
             outcomes = self.runner.run(context.language, context.source, context.reference_source, context.tests)
         except RunnerUnavailable as exc:
             return ServiceResult(self.name, "unavailable", evidence=("runner:unavailable",), diagnostics=(str(exc),))
+        if any(outcome.status == RunStatus.UNAVAILABLE for outcome in outcomes):
+            return ServiceResult(self.name, "unavailable", evidence=("runner:unavailable",), diagnostics=("isolated worker did not complete every required test",))
         serialized = tuple({
             "case_id": outcome.case_id, "status": outcome.status.value, "stdout": outcome.stdout,
             "stderr": outcome.stderr, "exit_code": outcome.exit_code, "weight": outcome.weight,
@@ -356,7 +401,7 @@ class RubricEvaluationService:
         if (preprocessing.status == "complete") != (syntax.status == "complete") or (syntax.status != "complete" and execution.status == "complete"):
             return ServiceResult(self.name, "invalid_evidence", lineage, diagnostics=("contradictory service evidence prevents scoring",), payload={"total": None, "category": None, "stages": list(self.stage_order), "stage_statuses": statuses, "criterion_evidence": criterion_evidence, "criterion_limitations": criterion_limitations}, lineage=lineage, service_version=self.version)
         if syntax.status != "complete":
-            return ServiceResult(self.name, syntax.status, lineage, syntax.diagnostics, payload={"total": None, "category": None, "components": {"syntax": 0.0}, "stages": list(self.stage_order), "stage_statuses": statuses, "policy_version": context.policy_version, "criterion_evidence": criterion_evidence, "criterion_limitations": criterion_limitations}, lineage=lineage, service_version=self.version)
+            return ServiceResult(self.name, syntax.status, lineage, syntax.diagnostics, payload={"total": None, "category": None, "components": {"syntax": 0.0} if syntax.status == "invalid_submission" else {}, "stages": list(self.stage_order), "stage_statuses": statuses, "policy_version": context.policy_version, "criterion_evidence": criterion_evidence, "criterion_limitations": criterion_limitations}, lineage=lineage, service_version=self.version)
         if execution.status != "complete":
             return ServiceResult(self.name, "incomplete", lineage, execution.diagnostics, payload={"total": None, "category": None, "stages": list(self.stage_order), "stage_statuses": statuses, "policy_version": context.policy_version, "criterion_evidence": criterion_evidence, "criterion_limitations": criterion_limitations}, lineage=lineage, service_version=self.version)
         outcomes = tuple(execution.payload.get("outcomes", ()))
@@ -449,6 +494,9 @@ class KnowledgeGraphReasoningService:
         if concept and concept.status == "complete":
             for concept_id, finding in concept.payload.get("findings", {}).items():
                 if finding == "absent" and concept_id in context.graph.concepts:
+                    if concept_id in satisfied:
+                        contradictions.add(concept_id)
+                    satisfied.discard(concept_id)
                     weak.add(concept_id)
                     static = f"concept:{concept_id}:absent"
                     prior = weak_evidence.get(concept_id, ())
@@ -496,7 +544,7 @@ class FeedbackCompositionService:
             syntax = evaluation.stages.get("syntax-analysis")
             location = syntax.metadata.diagnostics[0].location if syntax and syntax.metadata and syntax.metadata.diagnostics else None
             add("fix-syntax", message, category="syntax", severity="error", guidance=("Correct the reported syntax location and submit again.",), location=location)
-        elif scored.status in {"incomplete", "cancelled", "unsupported", "invalid_evidence"}:
+        elif scored.status in {"incomplete", "cancelled", "unsupported", "invalid_evidence", "analysis_limit", "unavailable", "undetermined"}:
             detail = scored.diagnostics[0] if scored.diagnostics else "Required assessment evidence is unavailable."
             add("evaluation-unavailable", f"{detail} No total score was produced.", category="availability", severity="warning", confidence=None, limitations=tuple(scored.diagnostics))
         else:
@@ -504,18 +552,29 @@ class FeedbackCompositionService:
             for outcome in scored.payload.get("test_outcomes", ()):
                 if outcome["status"] != "passed":
                     case_id = outcome['case_id']
-                    add("failed-test", f"The submitted program did not satisfy test case {case_id}.", f"test:{case_id}:{outcome['status']}", category="functional", severity="error", guidance=("Trace the input-to-output path for this case and correct the first divergent branch.",))
-            if components.get("structure", 100) < 60:
-                add("review-structure", "Normalized structure evidence is below the supported similarity threshold.", category="structure", severity="warning", guidance=("Compare control flow and decomposition with the stated task requirements.",))
-            complexity = evaluation.stages.get("complexity-analysis")
-            if complexity and complexity.status == "complete" and int(complexity.payload.get("loop_nesting", 0)) >= 2:
-                add("review-complexity", f"Static analysis found loop nesting depth {complexity.payload['loop_nesting']}.", complexity.evidence[0] if complexity.evidence else None, category="complexity", severity="warning", guidance=("Check whether repeated work can be removed or indexed.",), limitations=(str(complexity.payload.get("limitation", "Static complexity is an estimate.")),))
-            elif complexity and complexity.payload.get("unsupported_indicators"):
-                add("complexity-unknown", "Some complexity indicators are unsupported for this language and remain unknown.", complexity.evidence[0] if complexity.evidence else None, category="complexity", severity="warning", confidence=None, limitations=tuple(complexity.payload["unsupported_indicators"]))
+                    descriptions = {
+                        "wrong_output": ("produced output that did not match", "Check formatting, boundary conditions, and the calculation against the public examples."),
+                        "runtime_error": ("terminated with a runtime error on", "Inspect potentially invalid operations and handle permitted input boundaries."),
+                        "timeout": ("exceeded the time limit on", "Check loop termination and repeated work that grows with input size."),
+                        "resource_limit": ("exceeded a configured resource limit on", "Review memory allocation, process creation, and output volume against the assignment limits."),
+                    }
+                    description, action = descriptions.get(outcome["status"], ("did not satisfy", "Review the recorded outcome and the public task requirements."))
+                    add("failed-test", f"The submitted program {description} test case {case_id}.", f"test:{case_id}:{outcome['status']}", category="functional", severity="error", guidance=(action,), root_cause=f"The isolated worker reported {outcome['status']}.")
             if components.get("originality", 100) < 50:
                 add("similarity-heuristic", "The text-dissimilarity heuristic is low; this measure is not a plagiarism or misconduct verdict.", category="originality", severity="warning", limitations=("Text similarity is only a rubric heuristic.",))
-            if not items:
-                add("verified-evidence", "All available scored criteria are supported by the recorded evidence.", category="strength", severity="info")
+        if scored.status in {"complete", "incomplete"}:
+            provisional = scored.status != "complete"
+            static_limitations = ("Provisional static feedback; functional correctness has not been established.",) if provisional else ()
+            structure = evaluation.stages.get("structural-comparison")
+            if structure and structure.status == "complete" and float(structure.payload.get("score", 100)) < 60:
+                add("review-structure", "Normalized structure differs substantially from the reference; a different algorithm may still be valid.", structure.evidence[0] if structure.evidence else None, category="structure", severity="warning", guidance=("Compare control flow and decomposition with the stated task requirements.",), limitations=static_limitations + ("Structural similarity does not establish behavioral correctness.",))
+            complexity = evaluation.stages.get("complexity-analysis")
+            if complexity and complexity.status == "complete" and int(complexity.payload.get("loop_nesting", 0)) >= 2:
+                add("review-complexity", f"Static analysis found loop nesting depth {complexity.payload['loop_nesting']}.", complexity.evidence[0] if complexity.evidence else None, category="complexity", severity="warning", guidance=("Check whether repeated work can be removed or indexed.",), limitations=static_limitations + (str(complexity.payload.get("limitation", "Static complexity is an estimate.")),))
+            if complexity and complexity.payload.get("unsupported_indicators"):
+                add("complexity-unknown", "Some complexity indicators are unsupported for this language and remain unknown.", complexity.evidence[0] if complexity.evidence else None, category="complexity", severity="warning", confidence=None, limitations=static_limitations + tuple(complexity.payload["unsupported_indicators"]))
+        if scored.status == "complete" and not items:
+            add("verified-evidence", "All available scored criteria are supported by the recorded evidence.", category="strength", severity="info")
         if graph.status == "complete":
             weak_evidence = graph.payload.get("weak_evidence", {})
             for concept_id in graph.payload.get("ordered_prerequisites", ()):

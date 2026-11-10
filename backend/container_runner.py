@@ -140,6 +140,8 @@ def parse_worker_response(data: bytes, job: ContainerJob, policy: ContainerPolic
         exit_code = item.get("exit_code")
         if exit_code is not None and (not isinstance(exit_code, int) or isinstance(exit_code, bool)):
             raise RunnerUnavailable("worker exit code is invalid")
+        if status in {RunStatus.PASSED, RunStatus.WRONG_OUTPUT} and exit_code != 0:
+            raise RunnerUnavailable("worker success outcome requires a zero exit code")
         seen.add(case_id)
         outcomes.append(TestRun(case_id, status, stdout, stderr, exit_code, expected_weight))
     if seen != set(expected):

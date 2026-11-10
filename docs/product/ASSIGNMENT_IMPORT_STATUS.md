@@ -1,6 +1,6 @@
 # Assignment import implementation status
 
-Evidence date: 2026-11-09
+Evidence date: 2026-11-10
 
 ## Scope ownership
 
@@ -24,8 +24,10 @@ Imported assignments deliberately reuse those components. Their existing incompl
 | PDF ingestion and embedded text | VERIFIED for bounded fixtures | Signature, parser, encryption/active-feature/page limits and embedded text tests. No PDF rendering or scripts. |
 | Local OCR abstraction | PARTIALLY VERIFIED | Strict disabled-by-default Tesseract-compatible adapter and deterministic test adapter exist. No real OCR executable is provisioned. |
 | Structured draft and graph mapping | VERIFIED for deterministic fixtures | Missing fields remain missing; explicit language only; canonical exact graph mapping; provenance and stable normalization tests. |
-| Teacher review and confirmation | VERIFIED for component/API fixtures | Manual/upload/photo controls, provenance, editing, private save/resume, explicit confirmation, and existing assignment validation integration. |
+| Teacher review and confirmation | VERIFIED for component/API/browser fixtures | Manual/upload/photo controls, provenance, confidence/source-page review, accept/reject, editing, private save/resume, explicit confirmation, and existing assignment validation integration pass on desktop, tablet, and mobile. |
 | Real photo/handwriting accuracy | BLOCKED | Requires separately approved OCR runtime/provider and independently labeled non-sensitive corpus. |
 | Real student execution | BLOCKED | Approved isolated worker remains unavailable; assessment fails closed. |
 
 No external OCR/cloud service is configured or contacted. No faculty document is sent outside the local application.
+
+Current evidence: 222 backend tests, 61 frontend component tests, and 21 Playwright scenarios pass. The browser photo scenario uses a labeled deterministic adapter and is not real-provider evidence.

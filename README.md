@@ -242,5 +242,5 @@ Detailed status is maintained in [Implementation Status](docs/product/IMPLEMENTA
 
 This B.Tech Computer Science and Engineering final-year project investigates whether deterministic program analysis, versioned rubric scoring, Knowledge Graph reasoning, and evidence-grounded feedback can provide a more explainable assessment than output-only grading. Results are reported only for explicitly supported and reproducibly tested behavior.
 
-**Repository:** <https://github.com/manthri-kumar/Programming-Assessment-System>  
+**Repository:** <https://github.com/manthri-kumar/Programming-Assessment-System>
 **Status:** Active development; core application implemented, real execution/OCR/independent validation pending.

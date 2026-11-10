@@ -1,6 +1,6 @@
 # Backend final results
 
-Date: 2026-11-05  
+Date: 2026-11-10
 OpenSpec change: `backend-core-audit`  
 State: implementation in progress; backend acceptance is not established.
 
@@ -31,11 +31,11 @@ Automated coverage verifies graph versioning, duplicate/dangling/cyclic rejectio
 
 ## Verification results
 
-The complete environment-independent backend suite reports **109 passed, 0 failed, 0 skipped**. `compileall` succeeds and `pip check` reports no broken requirements. In addition to the prior coverage, the suite now consolidates ten requested two-agent cases across Python/C/Java and verifies persisted report retrieval after reopening SQLite with student/teacher ownership enforcement.
+The complete environment-independent backend suite reports **222 passed, 0 failed, 0 skipped**. `compileall` succeeds and `pip check` reports no broken requirements. Coverage includes assignment import, lifecycle recovery/privacy, worker protocol contracts, the requested two-agent cases across Python/C/Java, and persisted report retrieval after reopening SQLite with student/teacher ownership enforcement.
 
 ```text
 .venv\Scripts\python.exe -m pytest -q
-109 passed in 9.49s
+222 passed in 51.09s
 
 .venv\Scripts\python.exe -m compileall -q backend worker tests scripts main.py
 exit 0
@@ -53,7 +53,7 @@ node <existing-openspec-1.14.1-cli> validate implement-codeassess-frontend --str
 Change 'implement-codeassess-frontend' is valid
 ```
 
-The connected frontend verification reports **38 Vitest tests passed**, **12 Playwright browser scenarios passed** across desktop/tablet/mobile, and successful strict TypeScript, ESLint, and production-build checks. Browser coverage now includes student/teacher form registration, stored roles, login, reload-based session restoration, cross-role routing, and logout. The report view renders typed syntax, concept, structural, complexity, secure-test, and bounded output evidence instead of relegating it to raw JSON.
+The connected frontend verification reports **61 Vitest tests passed**, **21 Playwright browser scenarios passed** across desktop/tablet/mobile, and successful strict TypeScript, ESLint, and production-build checks. Browser coverage includes student/teacher authentication, assignment create/edit/import, student submission, both agents, report v3, responsive/accessibility checks, and authorization/failure states. The report view renders typed syntax, concept, structural, complexity, secure-test, and bounded output evidence instead of relegating it to raw JSON.
 
 Fake-runner tests supply deterministic outcomes to verify domain behavior. They are not real execution evidence. No student Python, C, or Java source was executed on the host. Docker Desktop or daemon availability was not checked.
 

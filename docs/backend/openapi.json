@@ -386,10 +386,26 @@
       "DraftPatch": {
         "additionalProperties": false,
         "properties": {
+          "confirmed_candidate_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Confirmed Candidate Ids",
+            "type": "array"
+          },
           "fields": {
             "maxProperties": 20,
             "title": "Fields",
             "type": "object"
+          },
+          "rejected_candidate_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Rejected Candidate Ids",
+            "type": "array"
           },
           "rejected_fields": {
             "items": {

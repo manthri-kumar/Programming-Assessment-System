@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { BarChart3, Braces, Camera, CheckCircle2, FileText, Upload, Users, X } from 'lucide-react'
+import { BarChart3, Braces, Camera, CheckCircle2, FileText, Upload, Users } from 'lucide-react'
 import { ApiError, api, queryKeys, type AssignmentPayload } from '../api/client'
-import type { AssignmentImport, AssignmentImportDraft, ImportDraftField, Language, TestCase } from '../api/types'
+import type { AssignmentImport, AssignmentImportDraft, Language, TestCase } from '../api/types'
+import { ImportReview } from '../features/ImportReview'
+import { applyImportFields, clearImportField, importFailure } from '../features/import-review'
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui'
 import { SubmissionsPage } from './student'
 
@@ -109,6 +111,10 @@ export function AssignmentFormPage() {
   const [importRecord, setImportRecord] = useState<AssignmentImport | null>(null)
   const [importError, setImportError] = useState('')
   const [previewUrl, setPreviewUrl] = useState('')
+  const [previewError, setPreviewError] = useState('')
+  const [savedSnapshot, setSavedSnapshot] = useState('')
+  const [draftSaved, setDraftSaved] = useState(false)
+  const [importStage, setImportStage] = useState('')
   const capabilities = useQuery({ queryKey: queryKeys.importCapabilities, queryFn: api.importCapabilities, enabled: !assignmentId, retry: false })
   const savedImports = useQuery({ queryKey: queryKeys.assignmentImports, queryFn: api.assignmentImports, enabled: !assignmentId, retry: false })
 
@@ -119,41 +125,79 @@ export function AssignmentFormPage() {
     setExampleText(item.examples.join('\n---\n'))
   }, [existing.data])
 
-  const save = useMutation({ mutationFn: (value: AssignmentPayload) => assignmentId ? api.updateAssignment(assignmentId, value) : importRecord ? api.confirmImport(importRecord.public_id, value) : api.createAssignment(value), onSuccess: () => { void client.invalidateQueries({ queryKey: queryKeys.assignments }); navigate('/teacher/assignments') }, onError: value => { const mapped = assignmentError(value); setError(mapped.summary); setFieldErrors(mapped.fields) } })
+  const save = useMutation({ mutationFn: async (value: AssignmentPayload) => {
+    if (assignmentId) return api.updateAssignment(assignmentId, value)
+    if (!importRecord) return api.createAssignment(value)
+    await api.updateImportDraft(importRecord.public_id, { ...value })
+    return api.confirmImport(importRecord.public_id, value)
+  }, onSuccess: () => { void client.invalidateQueries({ queryKey: queryKeys.assignments }); void client.invalidateQueries({ queryKey: queryKeys.analytics }); void client.invalidateQueries({ queryKey: queryKeys.assignmentImports }); navigate('/teacher/assignments') }, onError: value => { const mapped = assignmentError(value); setError(mapped.summary); setFieldErrors(mapped.fields) } })
   const knownConcepts = useMemo(() => new Set(graph.data?.nodes.map(node => node.id) ?? []), [graph.data])
   const visibleConcepts = (graph.data?.nodes ?? []).filter(node => `${node.label} ${node.id}`.toLowerCase().includes(conceptSearch.toLowerCase()))
   const toggleConcept = (conceptId: string) => setForm(current => ({ ...current, concept_ids: (current.concept_ids ?? []).includes(conceptId) ? (current.concept_ids ?? []).filter(id => id !== conceptId) : [...(current.concept_ids ?? []), conceptId] }))
 
-  const applyDraft = (record: AssignmentImport) => {
-    if (!('fields' in record.draft)) return
-    const fields = record.draft.fields
-    const present = (name:string) => fields[name]?.value != null
-    const value = <T,>(name: string, fallback: T): T => (fields[name]?.value ?? fallback) as T
-    setForm(current => ({ ...current,
-      ...(present('title')?{title:value('title',current.title)}:{}), ...(present('description')?{description:value('description',current.description)}:{}),
-      ...(present('requirements')?{requirements:value('requirements',current.requirements??'')}:{}), ...(present('language')?{language:value<Language>('language',current.language)}:{}),
-      ...(present('input_notes')?{input_notes:value('input_notes',current.input_notes??'')}:{}), ...(present('output_notes')?{output_notes:value('output_notes',current.output_notes??'')}:{}),
-      ...(present('constraints')?{constraints:value('constraints',current.constraints??'')}:{}), ...(present('concept_ids')?{concept_ids:value<string[]>('concept_ids',[]).filter(id=>knownConcepts.has(id))}:{}),
-      ...(present('reference_source')?{reference_source:value('reference_source',current.reference_source)}:{}) }))
-    if (present('examples')) { const examples=value<string[]>('examples',[]); setExampleText(examples.join('\n---\n')) }
+  const canonicalDraft = { ...form, examples: exampleText ? exampleText.split('\n---\n').map(value => value.trim()).filter(Boolean) : [] }
+  const snapshot = JSON.stringify(canonicalDraft)
+  const dirty = Boolean(importRecord && savedSnapshot && snapshot !== savedSnapshot)
+  const canDiscard = () => !dirty || window.confirm('Discard unsaved review changes? Save the private draft to keep them.')
+  const loadDraft = (record: AssignmentImport) => {
+    const next = 'fields' in record.draft ? applyImportFields({ ...defaultForm, language: '' as Language }, record.draft as AssignmentImportDraft, knownConcepts) : { ...defaultForm, language: '' as Language }
+    setImportRecord(record); setForm(next); setExampleText(next.examples?.join('\n---\n') ?? '')
+    setSavedSnapshot(JSON.stringify(next)); setDraftSaved(false)
   }
-
-  const upload = useMutation({ mutationFn: async (file: File) => { const created = await api.createImport(file, `${file.name}:${file.size}:${file.lastModified}`); return api.extractImport(created.public_id) }, onSuccess: record => { setImportRecord(record); setImportError(''); applyDraft(record) }, onError: value => { const error = value as ApiError; setImportError(error.status === 503 ? 'The document was uploaded, but local OCR is not configured. PDFs with embedded text remain supported; you can continue manually.' : error.status === 413 ? 'The document exceeds an upload, page, or image limit.' : error.detail && typeof error.detail === 'object' && 'message' in error.detail ? String((error.detail as {message:string}).message) : 'The document could not be imported. Check its type and contents.') } })
-  const patchImport = useMutation({ mutationFn: ({fields,rejected}:{fields:Record<string,unknown>;rejected?:string[]}) => api.updateImportDraft(importRecord!.public_id, fields, rejected), onSuccess: record => setImportRecord(record) })
-  const removeImport = useMutation({ mutationFn: () => api.deleteImport(importRecord!.public_id), onSuccess: () => { setImportRecord(null); setMode('manual'); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl('') } })
-
+  const extracted = (record: AssignmentImport) => { loadDraft(record); setImportError(''); setImportStage(''); void client.invalidateQueries({ queryKey: queryKeys.assignmentImports }) }
+  const failed = (value: unknown) => { setImportError(importFailure(value)); setImportStage('') }
+  const upload = useMutation({ mutationFn: async (file: File) => {
+    setImportError(''); setImportStage('Uploading and validating document…')
+    const created = await api.createImport(file, crypto.randomUUID())
+    loadDraft(created); void client.invalidateQueries({ queryKey: queryKeys.assignmentImports }); setImportStage('Extracting document…')
+    try { return await api.extractImport(created.public_id) }
+    catch (error) { const latest = await api.assignmentImport(created.public_id).catch(() => created); setImportRecord(latest); throw error }
+  }, onSuccess: extracted, onError: failed })
+  const retryExtraction = useMutation({ mutationFn: () => api.extractImport(importRecord!.public_id), onSuccess: extracted, onError: failed })
+  const patchImport = useMutation({ mutationFn: ({ fields, rejected, confirmed, rejectedCandidates }: { fields: Record<string, unknown>; rejected?: string[]; confirmed?: string[]; rejectedCandidates?: string[] }) => api.updateImportDraft(importRecord!.public_id, fields, rejected, confirmed, rejectedCandidates), onSuccess: record => { setImportRecord(record); setImportError(''); void client.invalidateQueries({ queryKey: queryKeys.assignmentImports }) }, onError: failed })
+  const removeImport = useMutation({ mutationFn: () => api.deleteImport(importRecord!.public_id), onSuccess: () => { setImportRecord(null); setMode('manual'); setImportError(''); setForm(defaultForm); setExampleText(''); void client.invalidateQueries({ queryKey: queryKeys.assignmentImports }) }, onError: failed })
+  const resumeImport = useMutation({ mutationFn: (id: string) => api.assignmentImport(id), onSuccess: record => { setMode(record.media_type === 'application/pdf' ? 'upload' : 'camera'); loadDraft(record); setImportError('') }, onError: failed })
+  const busy = upload.isPending || patchImport.isPending || retryExtraction.isPending || removeImport.isPending || save.isPending || resumeImport.isPending
   const importId = importRecord?.public_id
-  useEffect(() => { let active = true; if (!importId) return; api.importPreview(importId).then(blob => { if (!active) return; const url=URL.createObjectURL(blob); setPreviewUrl(old => { if(old)URL.revokeObjectURL(old); return url }) }).catch(()=>undefined); return () => { active=false } }, [importId])
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
+  useEffect(() => {
+    let active = true; let objectUrl = ''
+    setPreviewUrl(''); setPreviewError('')
+    if (importId) api.importPreview(importId).then(blob => { if (active) { objectUrl = URL.createObjectURL(blob); setPreviewUrl(objectUrl) } }).catch(value => { if (active) setPreviewError(`Preview unavailable. ${importFailure(value)}`) })
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [importId])
+  useEffect(() => {
+    if (!dirty || save.isPending) return
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    const navigation = (event: MouseEvent) => { const link = (event.target as Element).closest?.('a[href]'); if (link && !link.hasAttribute('download') && !window.confirm('Leave with unsaved review changes?')) { event.preventDefault(); event.stopPropagation() } }
+    window.addEventListener('beforeunload', beforeUnload); document.addEventListener('click', navigation, true)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); document.removeEventListener('click', navigation, true) }
+  }, [dirty, save.isPending])
+  const acceptField = (name: string) => {
+    if (!importRecord || !('fields' in importRecord.draft)) return
+    const field = importRecord.draft.fields[name]
+    patchImport.mutate({ fields: { [name]: field.value } }, { onSuccess: record => {
+      if (!('fields' in record.draft)) return
+      const next = applyImportFields(canonicalDraft, { ...record.draft as AssignmentImportDraft, fields: { [name]: record.draft.fields[name] } }, knownConcepts)
+      setForm(next); if (name === 'examples') setExampleText(next.examples?.join('\n---\n') ?? '')
+    } })
+  }
+  const rejectField = (name: string) => patchImport.mutate({ fields: {}, rejected: [name] }, { onSuccess: () => { setForm(current => clearImportField(current, name)); if (name === 'examples') setExampleText(''); setDraftSaved(false) } })
+  const candidateDecision = (id: string, accept: boolean) => patchImport.mutate({ fields: {}, confirmed: accept ? [id] : [], rejectedCandidates: accept ? [] : [id] }, { onSuccess: record => {
+    if (!accept || !('candidate_tests' in record.draft)) return
+    const candidate = record.draft.candidate_tests.find(value => value.id === id)
+    if (candidate && ['teacher-confirmed', 'worker-verified'].includes(candidate.verification)) setForm(current => ({ ...current, tests: [...current.tests.filter(value => value.id !== candidate.id), { id: candidate.id, input: candidate.input, expected_output: candidate.expected_output, weight: 1, concept_ids: [] }] }))
+  } })
 
   function submit(event: FormEvent) {
     event.preventDefault()
     setError('')
     if (graph.isPending || graph.error) { setError('Concepts could not be loaded. Retry before saving the assignment.'); return }
-    const payload: AssignmentPayload = { ...form, title: form.title.trim(), tests: form.tests.map(test => ({ ...test, id: test.id.trim() })), concept_ids: [...(form.concept_ids ?? [])], examples: exampleText ? exampleText.split('\n---\n').map(value => value.trim()).filter(Boolean) : [], deadline: form.deadline ? new Date(form.deadline).toISOString() : null }
+    if (importRecord && importRecord.state !== 'review-ready') { setError('Extract the document successfully or return to manual creation before publishing.'); return }
+    const payload: AssignmentPayload = { ...canonicalDraft, title: form.title.trim(), tests: form.tests.map(test => ({ ...test, id: test.id.trim() })), concept_ids: [...(form.concept_ids ?? [])] }
     const errors = validateAssignment(payload, knownConcepts)
     setFieldErrors(errors)
     if (Object.keys(errors).length) { setError('Please correct the highlighted assignment fields.'); return }
+    payload.deadline = form.deadline ? new Date(form.deadline).toISOString() : null
     save.mutate(payload)
   }
 
@@ -161,24 +205,26 @@ export function AssignmentFormPage() {
   return <><PageHeader title={assignmentId ? 'Edit assignment' : 'Create assignment'} description="Reference source, expected outputs, and rubric internals are hidden from students."/><Card className="form-card">
     {error && <div className="error-state" role="alert">{error}</div>}
     {!assignmentId && <div className="import-authoring">
-      <div className="mode-tabs" role="tablist" aria-label="Assignment creation method">
-        <Button type="button" variant={mode==='manual'?'primary':'secondary'} onClick={()=>setMode('manual')}>Manual</Button>
-        <Button type="button" variant={mode==='upload'?'primary':'secondary'} onClick={()=>setMode('upload')}><Upload size={16}/> Upload Image/PDF</Button>
-        <Button type="button" variant={mode==='camera'?'primary':'secondary'} onClick={()=>setMode('camera')}><Camera size={16}/> Take Photo</Button>
+      <div className="mode-tabs" role="group" aria-label="Assignment creation method">
+        <Button type="button" aria-pressed={mode==='manual'} disabled={busy} variant={mode==='manual'?'primary':'secondary'} onClick={()=>{if(canDiscard()){setMode('manual');setImportRecord(null);setImportError('')}}}>Manual</Button>
+        <Button type="button" aria-pressed={mode==='upload'} disabled={busy || capabilities.data?.enabled === false} variant={mode==='upload'?'primary':'secondary'} onClick={()=>setMode('upload')}><Upload size={16}/> Upload Image/PDF</Button>
+        <Button type="button" aria-pressed={mode==='camera'} disabled={busy || capabilities.data?.enabled === false} variant={mode==='camera'?'primary':'secondary'} onClick={()=>setMode('camera')}><Camera size={16}/> Take Photo</Button>
       </div>
-      {mode!=='manual' && <div className="import-drop" onDragOver={event=>event.preventDefault()} onDrop={event=>{event.preventDefault();const file=event.dataTransfer.files[0];if(file)upload.mutate(file)}}>
+      {mode!=='manual' && <div className="import-drop" onDragOver={event=>event.preventDefault()} onDrop={event=>{event.preventDefault();const file=event.dataTransfer.files[0];if(file&&!busy&&canDiscard())upload.mutate(file)}}>
         <FileText aria-hidden="true"/><p>{mode==='camera'?'Take or select a photo of the assignment.':'Drop a PNG, JPEG, WebP, or PDF here, or choose a file.'}</p>
-        <label className="button button-secondary">{upload.isPending?'Extracting…':'Choose document'}<input className="sr-only" type="file" accept={mode==='camera'?'image/*':'.png,.jpg,.jpeg,.webp,.pdf'} capture={mode==='camera'?'environment':undefined} disabled={upload.isPending} onChange={event=>{const file=event.target.files?.[0];if(file)upload.mutate(file)}}/></label>
+        <label className="button button-secondary">Choose document<input className="sr-only" type="file" accept={mode==='camera'?'image/*':'.png,.jpg,.jpeg,.webp,.pdf'} capture={mode==='camera'?'environment':undefined} disabled={busy} onChange={event=>{const file=event.target.files?.[0];if(file&&canDiscard())upload.mutate(file);event.target.value=''}}/></label>
+        {importStage && <p role="status">{importStage}</p>}
         <small>Private teacher document · 10 MiB maximum · never published automatically</small>
       </div>}
       {capabilities.data && !capabilities.data.ocr && mode==='camera' && <p className="field-warning">Local OCR is not configured. Photo extraction will report unavailable; manual entry remains available.</p>}
-      {!importRecord && savedImports.data?.length ? <div><h2>Resume a private import</h2><div className="stack">{savedImports.data.slice(0,5).map(item=><Button type="button" variant="secondary" key={item.public_id} onClick={()=>{setMode(item.media_type==='application/pdf'?'upload':'camera');setImportRecord(item);applyDraft(item)}}>{item.original_name} · {item.state}</Button>)}</div></div>:null}
+      {!importRecord && savedImports.data?.length ? <div><h2>Resume a private import</h2><div className="stack">{savedImports.data.slice(0,5).map(item=><Button type="button" disabled={busy} variant="secondary" key={item.public_id} onClick={()=>resumeImport.mutate(item.public_id)}>{item.original_name} · {item.state}</Button>)}</div></div>:null}
       {importError && <div className="error-state" role="alert">{importError}</div>}
-      {importRecord && <ImportReview record={importRecord} previewUrl={previewUrl} onUse={name=>{if(!('fields' in importRecord.draft))return;const draft=importRecord.draft as AssignmentImportDraft;const field=draft.fields[name];if(field)applyDraft({...importRecord,draft:{...draft,fields:{[name]:field}}})}} onReject={name=>patchImport.mutate({fields:{},rejected:[name]})} onSave={()=>patchImport.mutate({fields:{title:form.title,description:form.description,requirements:form.requirements??'',language:form.language,input_notes:form.input_notes??'',output_notes:form.output_notes??'',constraints:form.constraints??'',concept_ids:form.concept_ids??[],reference_source:form.reference_source,examples:exampleText?exampleText.split('\n---\n').map(value=>value.trim()).filter(Boolean):[]}})} onRemove={()=>removeImport.mutate()}/>} 
+      {importRecord && <ImportReview record={importRecord} previewUrl={previewUrl} previewError={previewError} busy={busy} saved={draftSaved && !dirty} onUse={acceptField} onReject={rejectField} onCandidate={candidateDecision} onSave={()=>patchImport.mutate({fields:{...canonicalDraft}}, {onSuccess:()=>{setSavedSnapshot(snapshot);setDraftSaved(true)}})} onRemove={()=>{if(canDiscard())removeImport.mutate()}} onRetry={()=>retryExtraction.mutate()}/>}
     </div>}
     <form onSubmit={submit} className="form-grid" noValidate>
+      <fieldset disabled={busy} className="assignment-fields" aria-label="Assignment fields">
       <Field label="Title" error={fieldErrors.title}><input aria-invalid={Boolean(fieldErrors.title)} maxLength={200} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}/></Field>
-      <Field label="Language" error={fieldErrors.language}><select aria-invalid={Boolean(fieldErrors.language)} value={form.language} onChange={e => setForm({ ...form, language: e.target.value as Language })}><option value="python">Python 3.11</option><option value="c">C11 (Clang)</option><option value="java">Java 17</option></select></Field>
+      <Field label="Language" error={fieldErrors.language}><select aria-invalid={Boolean(fieldErrors.language)} value={form.language} onChange={e => setForm({ ...form, language: e.target.value as Language })}><option value="" disabled>Select a language</option><option value="python">Python 3.11</option><option value="c">C11 (Clang)</option><option value="java">Java 17</option></select></Field>
       <Field full label="Description"><textarea maxLength={4000} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}/></Field>
       <Field full label="Requirements"><textarea maxLength={8000} value={form.requirements} onChange={e => setForm({ ...form, requirements: e.target.value })}/></Field>
       <Field label="Input notes"><textarea maxLength={4000} value={form.input_notes} onChange={e => setForm({ ...form, input_notes: e.target.value })}/></Field>
@@ -190,21 +236,11 @@ export function AssignmentFormPage() {
       <Field full label="Reference solution" error={fieldErrors.reference_source}><textarea aria-invalid={Boolean(fieldErrors.reference_source)} className="code-input" value={form.reference_source} onChange={e => setForm({ ...form, reference_source: e.target.value })}/></Field>
       <div className="field-full"><h2>Rubric weights</h2>{fieldErrors.rubric && <p className="field-error">{fieldErrors.rubric}</p>}<div className="weight-grid">{['structure', 'syntax', 'tests', 'originality'].map(name => <Field key={name} label={name}><input type="number" min="0" max="1" step="0.01" value={form.rubric.weights?.[name] ?? 0} onChange={e => setForm({ ...form, rubric: { ...form.rubric, weights: { ...form.rubric.weights, [name]: Number(e.target.value) } } })}/></Field>)}</div></div>
       <div className="field-full"><div className="section-title"><h2>Hidden tests</h2><Button type="button" variant="secondary" onClick={() => setForm({ ...form, tests: [...form.tests, { ...emptyTest, id: `case-${form.tests.length + 1}` }] })}>Add test</Button></div>{fieldErrors.tests && <p className="field-error">{fieldErrors.tests}</p>}{form.tests.map((test, index) => <Card key={index} className="test-editor"><Field label="Test ID" error={fieldErrors[`tests.${index}.id`]}><input aria-invalid={Boolean(fieldErrors[`tests.${index}.id`])} value={test.id} onChange={e => setForm({ ...form, tests: form.tests.map((value, i) => i === index ? { ...value, id: e.target.value } : value) })}/></Field><Field label="Input" error={fieldErrors[`tests.${index}.input`]}><textarea value={test.input} onChange={e => setForm({ ...form, tests: form.tests.map((value, i) => i === index ? { ...value, input: e.target.value } : value) })}/></Field><Field label="Expected output" error={fieldErrors[`tests.${index}.expected_output`]}><textarea value={test.expected_output} onChange={e => setForm({ ...form, tests: form.tests.map((value, i) => i === index ? { ...value, expected_output: e.target.value } : value) })}/></Field><Field label="Weight" error={fieldErrors[`tests.${index}.weight`]}><input type="number" min="0.01" step="0.01" value={test.weight} onChange={e => setForm({ ...form, tests: form.tests.map((value, i) => i === index ? { ...value, weight: Number(e.target.value) } : value) })}/></Field><Button type="button" variant="danger" disabled={form.tests.length === 1} onClick={() => setForm({ ...form, tests: form.tests.filter((_, i) => i !== index) })}>Remove</Button></Card>)}</div>
-      <div className="form-actions field-full"><Button type="button" variant="secondary" onClick={() => navigate('/teacher/assignments')}>Cancel</Button><Button disabled={save.isPending || Boolean(graph.error)}>{save.isPending ? 'Saving…' : importRecord ? 'Confirm and create assignment' : 'Save assignment'}</Button></div>
+      <div className="form-actions field-full"><Button type="button" variant="secondary" onClick={() => {if(canDiscard())navigate('/teacher/assignments')}}>Cancel</Button><Button disabled={busy || Boolean(graph.error) || Boolean(importRecord && importRecord.state!=='review-ready')}>{save.isPending ? 'Saving…' : importRecord ? 'Confirm and create assignment' : 'Save assignment'}</Button></div>
+      </fieldset>
     </form>
   </Card></>
 }
-
-function ImportReview({record,previewUrl,onUse,onReject,onSave,onRemove}:{record:AssignmentImport;previewUrl:string;onUse:(name:string)=>void;onReject:(name:string)=>void;onSave:()=>void;onRemove:()=>void}) {
-  const fields = 'fields' in record.draft ? record.draft.fields : {}
-  return <Card className="import-review"><div className="section-title"><div><h2>Review extracted draft</h2><p className="muted">Nothing is published until you confirm the validated form.</p></div><Button type="button" variant="danger" onClick={onRemove}><X size={16}/> Remove import</Button></div>
-    <div className="import-review-grid"><div>{previewUrl && record.media_type.startsWith('image/') ? <img className="import-preview" src={previewUrl} alt="Uploaded assignment preview"/> : previewUrl ? <a className="button button-secondary" href={previewUrl} download={record.original_name}>Download original PDF</a> : <Skeleton lines={4}/>}</div><div className="provenance-list">{Object.entries(fields).filter(([,field])=>field.value!=null).map(([name,field])=><div className="provenance-row" key={name}><div><strong>{name.replaceAll('_',' ')}</strong> <Badge tone={field.origin==='teacher-confirmed'?'green':'gold'}>{field.origin}</Badge>{field.confidence!=null&&<small> {Math.round(field.confidence*100)}% confidence</small>}<p className="muted">{summarizeImportField(field)}</p>{field.sources[0]&&<small>Source page {field.sources[0].page}</small>}{field.warnings.map(value=><p className="field-warning" key={value}>{value}</p>)}</div><div className="stack"><Button type="button" variant="secondary" onClick={()=>onUse(name)}>Use</Button>{field.origin==='provider-suggested'&&<Button type="button" variant="ghost" onClick={()=>onReject(name)}>Reject</Button>}</div></div>)}</div></div>
-    {'unresolved_concepts' in record.draft && record.draft.unresolved_concepts.length>0&&<p className="field-warning">Unresolved concepts: {record.draft.unresolved_concepts.join(', ')}. Select canonical concepts below.</p>}
-    <Button type="button" variant="secondary" onClick={onSave}>Save review draft</Button>
-  </Card>
-}
-
-function summarizeImportField(field:ImportDraftField){const value=field.value;if(Array.isArray(value))return value.join(', ').slice(0,180);if(value&&typeof value==='object')return 'Structured suggestion — review before use.';return String(value??'').slice(0,180)}
 
 function Field({ label, children, full = false, error }: { label: string; children: React.ReactNode; full?: boolean; error?: string }) { return <label className={`field ${full ? 'field-full' : ''}`}><span>{label}</span>{children}{error && <span className="field-error">{error}</span>}</label> }
 export function TeacherSubmissions() { return <SubmissionsPage teacher/> }

@@ -135,9 +135,9 @@ test('teacher form creates and edits an assignment through the complete fail-clo
   await login(page, teacherEmail)
   await page.goto('/teacher/assignments/new')
   await expect(page.getByRole('heading', { name: 'Create assignment' })).toBeVisible()
-  await page.getByLabel('Title').fill(title)
-  await page.getByLabel('Description').fill('Echo one line of input.')
-  await page.getByLabel('Reference solution').fill('print(input())')
+  await page.getByLabel('Title', { exact: true }).fill(title)
+  await page.getByLabel('Description', { exact: true }).fill('Echo one line of input.')
+  await page.getByLabel('Reference solution', { exact: true }).fill('print(input())')
   await page.getByLabel('Input', { exact: true }).fill('hello\n')
   await page.getByLabel('Expected output').fill('hello\n')
   await page.getByLabel('Assignment concepts').getByRole('checkbox').first().check()
@@ -152,7 +152,7 @@ test('teacher form creates and edits an assignment through the complete fail-clo
 
   await page.goto(`/teacher/assignments/${createdId}/edit`)
   await expect(page.getByRole('heading', { name: 'Edit assignment' })).toBeVisible()
-  await page.getByLabel('Title').fill(updatedTitle)
+  await page.getByLabel('Title', { exact: true }).fill(updatedTitle)
   const updateResponse = page.waitForResponse(response => response.url().endsWith(`/assignments/${createdId}`) && response.request().method() === 'PATCH')
   await page.getByRole('button', { name: 'Save assignment' }).click()
   expect((await updateResponse).status()).toBe(200)
@@ -202,7 +202,7 @@ test('teacher imports embedded PDF text, reviews it, and explicitly creates a st
   await login(page,teacherEmail);await page.goto('/teacher/assignments/new');await page.getByRole('button',{name:/Upload Image\/PDF/}).click()
   await page.getByLabel(/Choose document/).setInputFiles({name:'question.pdf',mimeType:'application/pdf',buffer:assignmentPdf})
   await expect(page.getByRole('heading',{name:'Review extracted draft'})).toBeVisible()
-  await page.getByLabel('Title').fill(title);await page.getByLabel('Reference solution').fill('print(sum(map(int,input().split())))');await page.getByLabel('Input',{exact:true}).fill('1 2\n');await page.getByLabel('Expected output').fill('3\n')
+  await page.getByLabel('Title',{exact:true}).fill(title);await page.getByLabel('Reference solution',{exact:true}).fill('print(sum(map(int,input().split())))');await page.getByLabel('Input',{exact:true}).fill('1 2\n');await page.getByLabel('Expected output').fill('3\n')
   const boxes=page.getByLabel('Assignment concepts').getByRole('checkbox');if(!(await boxes.first().isChecked()))await boxes.first().check()
   const confirmed=page.waitForResponse(response=>response.url().includes('/assignment-imports/')&&response.url().endsWith('/confirm'))
   await page.getByRole('button',{name:'Confirm and create assignment'}).click();expect((await confirmed).status()).toBe(201);await expect(page).toHaveURL(/\/teacher\/assignments$/);await expect(page.getByText(title)).toBeVisible()
@@ -223,13 +223,24 @@ test('teacher reviews a photographed question with the deterministic browser ada
     } }, config_hash: 'b'.repeat(64), assignment_id: null, expires_at: '2026-12-01T00:00:00Z', created_at: now, updated_at: now,
   }
   let patched = false
+  let uploaded = false
+  let savedFields: Record<string, unknown> = {}
   await page.route('**/assignment-imports/photo-browser-adapter/preview', route => route.fulfill({ status: 200, contentType: 'image/png', body: assignmentPhoto }))
   await page.route('**/assignment-imports/photo-browser-adapter/extract', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(draft) }))
-  await page.route('**/assignment-imports/photo-browser-adapter/draft', async route => { patched = true; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(draft) }) })
+  await page.route('**/assignment-imports/photo-browser-adapter/draft', async route => {
+    patched = true
+    const body = route.request().postDataJSON() as { fields: Record<string, unknown>; rejected_fields: string[] }
+    savedFields = { ...savedFields, ...body.fields }
+    const fields = draft.draft.fields as Record<string, { value: unknown; origin: string; confidence: number | null; sources: Array<{page: number; text: string}>; warnings: string[]; verification: string }>
+    for (const [name, value] of Object.entries(body.fields)) fields[name] = { value, origin: 'teacher-confirmed', confidence: 1, sources: fields[name]?.sources ?? [], warnings: [], verification: 'teacher-confirmed' }
+    for (const name of body.rejected_fields ?? []) fields[name] = { value: null, origin: 'missing', confidence: null, sources: [], warnings: [], verification: 'unverified' }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(draft) })
+  })
+  await page.route('**/assignment-imports/photo-browser-adapter', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(draft) }))
   await page.route('**/assignment-imports/capabilities', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: true, embedded_pdf_text: true, ocr: true, ocr_provider: 'deterministic-browser-adapter' }) }))
   await page.route('**/assignment-imports', async route => {
-    if (route.request().method() === 'POST') await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ ...draft, state: 'validated', extraction: { segments: [] }, draft: {} }) })
-    else await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    if (route.request().method() === 'POST') { uploaded = true; await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ ...draft, state: 'validated', extraction: { segments: [] }, draft: {} }) }) }
+    else await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(uploaded ? [draft] : []) })
   })
   await login(page, teacherEmail)
   await page.goto('/teacher/assignments/new')
@@ -237,11 +248,26 @@ test('teacher reviews a photographed question with the deterministic browser ada
   await page.getByLabel(/Choose document/).setInputFiles({ name: 'question-photo.png', mimeType: 'image/png', buffer: assignmentPhoto })
   await expect(page.getByRole('heading', { name: 'Review extracted draft' })).toBeVisible()
   await expect(page.getByAltText('Uploaded assignment preview')).toBeVisible()
-  await expect(page.getByLabel('Title')).toHaveValue('Photo Sum')
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Photo Sum')
   await expect(page.getByText('82% confidence')).toBeVisible()
   await expect(page.getByText('Review low-confidence text.')).toBeVisible()
+  await expectNamedControls(page)
+  await expectNoPageOverflow(page)
+  await page.getByRole('button', { name: 'Reject Description' }).click()
+  await expect(page.getByLabel('Description', { exact: true })).toHaveValue('')
+  await page.getByLabel('Title', { exact: true }).fill('Photo Sum corrected')
+  await page.getByLabel('Reference solution', { exact: true }).fill('print(3)')
+  await page.getByLabel('Expected output', { exact: true }).fill('3')
   await page.getByRole('button', { name: 'Save review draft' }).click()
   await expect.poll(() => patched).toBe(true)
+  await expect(page.getByText('Private review saved.')).toBeVisible()
+  expect(savedFields).toMatchObject({ title: 'Photo Sum corrected', reference_source: 'print(3)', tests: [{ id: 'case-1', expected_output: '3' }], rubric: { policy_version: 'core-v1' } })
+  await page.reload()
+  await page.getByRole('button', { name: 'question-photo.png · review-ready' }).click()
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Photo Sum corrected')
+  await expect(page.getByRole('textbox', { name: 'Reference solution', exact: true })).toHaveValue('print(3)')
+  await expect(page.getByRole('textbox', { name: 'Expected output', exact: true })).toHaveValue('3')
+  await expectNoPageOverflow(page)
   await expect(page.getByRole('button', { name: 'Confirm and create assignment' })).toBeVisible()
   // This is UI evidence for the deterministic adapter, not proof of a provisioned OCR runtime.
 })

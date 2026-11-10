@@ -35,8 +35,9 @@ export interface Activity { id: number; kind: string; assignment_id: number | nu
 
 export type ImportOrigin = 'missing' | 'extracted' | 'provider-suggested' | 'teacher-confirmed'
 export interface ImportSourceRef { page: number; text: string }
-export interface ImportDraftField { value: unknown; origin: ImportOrigin; confidence: number | null; sources: ImportSourceRef[]; warnings: string[] }
-export interface AssignmentImportDraft { schema_version: 'assignment-import-draft-v1'; fields: Record<string, ImportDraftField>; unresolved_concepts: string[]; candidate_tests: unknown[]; config_hash: string }
+export interface ImportDraftField { value: unknown; origin: ImportOrigin; confidence: number | null; sources: ImportSourceRef[]; warnings: string[]; verification?: 'unverified' | 'source-provided' | 'teacher-confirmed' | 'worker-verified' }
+export interface ImportCandidate { id: string; input: string; expected_output: string; origin: 'extracted' | 'provider-generated'; verification: 'unverified' | 'teacher-confirmed' | 'worker-verified'; sources: ImportSourceRef[] }
+export interface AssignmentImportDraft { schema_version: 'assignment-import-draft-v1'; fields: Record<string, ImportDraftField>; unresolved_concepts: string[]; candidate_tests: ImportCandidate[]; config_hash: string }
 export interface AssignmentImport {
   public_id: string; state: string; media_type: string; original_name: string; byte_size: number; content_hash: string
   metadata: Record<string, unknown>; extraction: { schema_version?: string; segments?: Array<{ page: number; method: string; text: string; confidence: number | null }> }

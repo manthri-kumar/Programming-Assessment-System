@@ -4,7 +4,7 @@ import pytest
 
 from concurrent.futures import ThreadPoolExecutor
 
-from worker.entrypoint import WorkerInputError, execute_job, language_commands, validate_job
+from worker.entrypoint import WorkerInputError, _decode, _terminate_group, capture_process, execute_job, language_commands, validate_job
 
 
 def job(**overrides):
@@ -51,6 +51,7 @@ def test_real_worker_verifier_covers_required_failure_and_cleanup_scenarios_with
     required = {
         "python-compile", "c-compile", "java-compile",
         "crash-after-output", "timeout-with-child", "output-limit", "memory-limit", "process-limit",
+        "input-backpressure-timeout", "exited-parent-live-child",
         "scratch-limit", "network-denied", "host-file-denied", "outer-whitespace", "internal-whitespace",
         "cancellation", "cleanup-repeat-1", "cleanup-repeat-2",
     }
@@ -116,3 +117,56 @@ def test_overlapping_jobs_use_unique_workspaces_and_remove_them(tmp_path):
     assert all(result["outcomes"][0]["status"] == "completed" for result in results)
     assert len({str(path) for path in observed}) == 4
     assert all(not path.exists() for path in observed)
+
+
+def test_cleanup_targets_descendants_even_when_parent_already_exited(monkeypatch):
+    from types import SimpleNamespace
+    import signal
+    calls = []
+    process = SimpleNamespace(pid=12345, poll=lambda: 0, wait=lambda timeout: calls.append(("wait", timeout)))
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr("worker.entrypoint.os.killpg", lambda pid, signum: calls.append((pid, signum)), raising=False)
+    _terminate_group(process)
+    assert calls == [(12345, signal.SIGKILL), ("wait", 1)]
+
+
+def test_invalid_utf8_replacement_cannot_expand_output_budget():
+    payload = bytearray(b"\xff" * 65536)
+    assert len(_decode(payload).encode("utf-8")) <= 65536
+    assert _decode(bytearray("hello \u2603".encode())) == "hello \u2603"
+
+
+def test_nonreading_process_cannot_block_input_transfer_past_deadline(monkeypatch, tmp_path):
+    """Contract test only: no program is launched, including the test helper."""
+    from types import SimpleNamespace
+    import signal
+    import selectors
+
+    class Stream:
+        def __init__(self, descriptor): self.descriptor, self.closed = descriptor, False
+        def fileno(self): return self.descriptor
+        def close(self): self.closed = True
+
+    class Selector:
+        def __init__(self): self.keys, self.closed = {}, False
+        def register(self, stream, events, data): self.keys[stream] = SimpleNamespace(fileobj=stream, data=data)
+        def unregister(self, stream): self.keys.pop(stream)
+        def get_map(self): return self.keys
+        def select(self, timeout): return [(next(key for key in self.keys.values() if key.data == "stdin"), selectors.EVENT_WRITE)]
+        def close(self): self.closed = True
+
+    selector = Selector()
+    streams = [Stream(index) for index in range(3)]
+    process = SimpleNamespace(stdin=streams[0], stdout=streams[1], stderr=streams[2], pid=12345, wait=lambda timeout: 0)
+    monkeypatch.setattr("worker.entrypoint.subprocess.Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr("worker.entrypoint.selectors.DefaultSelector", lambda: selector)
+    monkeypatch.setattr("worker.entrypoint.os.set_blocking", lambda *args: None, raising=False)
+    monkeypatch.setattr("worker.entrypoint.os.write", lambda *args: (_ for _ in ()).throw(BlockingIOError()))
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    killed = []
+    monkeypatch.setattr("worker.entrypoint.os.killpg", lambda *args: killed.append(args), raising=False)
+    ticks = iter([0, 0, 3])
+    monkeypatch.setattr("worker.entrypoint.time.monotonic", lambda: next(ticks))
+    result = capture_process(("unused-test-command",), tmp_path, "x" * 65536, 2, 65536)
+    assert result["status"] == "timeout"
+    assert killed and selector.closed and all(stream.closed for stream in streams)

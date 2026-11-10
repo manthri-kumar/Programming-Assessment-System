@@ -35,13 +35,22 @@ def _node(node: ast.AST) -> IRNode:
 def analyze(source: str, max_nodes: int = 10_000) -> PythonAnalysis:
     try:
         tree = ast.parse(source, mode="exec")
+    except RecursionError:
+        return PythonAnalysis(False, ("analysis_limit: parser recursion limit exceeded",), None)
     except (SyntaxError, ValueError, TypeError) as exc:
         location = f" line {exc.lineno}" if isinstance(exc, SyntaxError) and exc.lineno else ""
         return PythonAnalysis(False, (f"syntax error{location}: {exc.msg if isinstance(exc, SyntaxError) else exc}",), None)
+    pending = [(tree, 0)]
+    count = 0
+    while pending:
+        node, depth = pending.pop()
+        count += 1
+        if count > max_nodes:
+            return PythonAnalysis(False, ("analysis_limit: AST node limit exceeded",), None)
+        if depth > 128:
+            return PythonAnalysis(False, ("analysis_limit: AST depth limit exceeded",), None)
+        pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     root = _node(tree)
-    count = sum(1 for _ in ast.walk(tree))
-    if count > max_nodes:
-        return PythonAnalysis(False, ("analysis_limit: AST node limit exceeded",), None)
     unsupported: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

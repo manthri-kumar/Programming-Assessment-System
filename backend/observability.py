@@ -20,7 +20,28 @@ class ErrorCode(str, Enum):
     INTERNAL = "internal_error"
 
 
-SENSITIVE_KEYS = {"password", "password_hash", "secret", "token", "authorization", "source", "reference_source", "stdout", "stderr"}
+SENSITIVE_KEYS = {
+    "api_key",
+    "authorization",
+    "cookie",
+    "credentials",
+    "document_bytes",
+    "extracted_text",
+    "hidden_tests",
+    "password",
+    "password_hash",
+    "path",
+    "prompt",
+    "provider_response",
+    "raw_provider_response",
+    "reference_source",
+    "secret",
+    "source",
+    "stderr",
+    "stdout",
+    "storage_key",
+    "token",
+}
 
 
 def redact(value: Any) -> Any:

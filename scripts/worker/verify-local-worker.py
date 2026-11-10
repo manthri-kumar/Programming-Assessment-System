@@ -7,8 +7,12 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
+import sys
 import time
 import uuid
+
+# Support the documented direct invocation from the repository checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.container_runner import ContainerJob, ContainerPolicy
 from backend.runner import RunnerUnavailable
@@ -52,6 +56,8 @@ def main() -> int:
         execute("crash-after-output", "python", "print('expected')\nraise SystemExit(7)\n", "runtime_error", expected="expected\n"),
         execute("timeout", "python", "while True: pass\n", "timeout"),
         execute("timeout-with-child", "python", "import subprocess,sys\nsubprocess.Popen([sys.executable,'-c','while True: pass'])\nwhile True: pass\n", "timeout"),
+        execute("input-backpressure-timeout", "python", "while True: pass\n", "timeout", stdin="x" * 65536),
+        execute("exited-parent-live-child", "python", "import os,time\nif os.fork() == 0: time.sleep(60)\nelse: os._exit(0)\n", "timeout"),
         execute("output-limit", "python", "print('x' * 70000)\n", "resource_limit"),
         execute("memory-limit", "python", "x=[]\nwhile True: x.append(bytearray(1024*1024))\n", "resource_limit"),
         execute("process-limit", "python", "import os\nwhile True: os.fork()\n", "resource_limit"),

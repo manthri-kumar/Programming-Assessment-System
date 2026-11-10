@@ -15,11 +15,15 @@ import json
 import os
 from pathlib import Path
 import re
-import signal
 import ssl
 import stat
 import subprocess
 from typing import Any
+
+if __package__:
+    from .entrypoint import capture_process
+else:
+    from entrypoint import capture_process
 
 
 MAX_CONTROL_BYTES = 8 * 1024 * 1024
@@ -83,8 +87,13 @@ def finalize_container_response(job: dict[str, Any], raw_response: bytes) -> byt
             raise ValueError("invalid outcome streams")
         case = expected[outcome["case_id"]]
         status = outcome["status"]
+        exit_code = outcome.get("exit_code")
+        if exit_code is not None and (not isinstance(exit_code, int) or isinstance(exit_code, bool)):
+            raise ValueError("invalid outcome exit code")
         if status == "completed":
-            status = "passed" if stdout.strip() == case["expected_output"].strip() else "wrong_output"
+            if exit_code is None:
+                raise ValueError("completed outcome requires an exit code")
+            status = "runtime_error" if exit_code != 0 else ("passed" if stdout.strip() == case["expected_output"].strip() else "wrong_output")
         finalized.append({
             "case_id": outcome["case_id"], "status": status, "stdout": stdout, "stderr": stderr,
             "exit_code": outcome.get("exit_code"), "weight": float(case["weight"]),
@@ -162,7 +171,7 @@ class PodmanEngine:
             raise ValueError("unsupported language")
         memory = "536870912" if language == "java" else "268435456"
         return (
-            self.config.podman, "run", "--pull", "never", "--name", self.container_name(job_id),
+            self.config.podman, "run", "--interactive", "--pull", "never", "--name", self.container_name(job_id),
             "--network", "none", "--ipc", "private", "--read-only", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--security-opt", f"seccomp={self.config.seccomp_profile}",
             "--pids-limit", "64", "--memory", memory, "--memory-swap", memory, "--cpus", "1",
@@ -173,6 +182,19 @@ class PodmanEngine:
         )
 
     def inspect(self) -> tuple[bool, dict[str, str]]:
+        runtime = subprocess.run(
+            [self.config.podman, "info", "--format", "json"],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=10, check=False,
+        )
+        try:
+            info = json.loads(runtime.stdout)
+            host = info["host"]
+            if runtime.returncode != 0 or len(runtime.stdout) > 64 * 1024 or host["security"]["rootless"] is not True:
+                return False, {}
+            if host["cgroupVersion"] != "v2" or not {"cpu", "memory", "pids"} <= set(host["cgroupControllers"]):
+                return False, {}
+        except (KeyError, TypeError, UnicodeError, json.JSONDecodeError):
+            return False, {}
         result = subprocess.run(
             [self.config.podman, "image", "inspect", self.config.image_reference, "--format", "{{json .Labels}}"],
             stdin=subprocess.DEVNULL, capture_output=True, timeout=10, check=False,
@@ -204,29 +226,31 @@ class PodmanEngine:
         ready, _ = self.inspect()
         if not ready:
             return 503, b'{"error":{"code":"toolchain_unverified"}}'
-        process = subprocess.Popen(
-            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
-        )
         try:
-            stdout, stderr = process.communicate(container_job, timeout=125)
-            if len(stdout) > MAX_CONTROL_BYTES:
+            # Rootless Podman needs the dedicated account's runtime directory.
+            # This environment belongs to the control process, never the job.
+            environment = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
+            environment.update({key: os.environ[key] for key in ("HOME", "XDG_RUNTIME_DIR") if key in os.environ})
+            result = capture_process(command, Path.cwd(), container_job.decode("utf-8"), 125, MAX_CONTROL_BYTES, environment=environment)
+            if result["status"] == "resource_limit":
                 return 502, b'{"error":{"code":"worker_response_too_large"}}'
-            if process.returncode != 0:
-                return 502, json.dumps({"error": {"code": "worker_failed", "exit_code": process.returncode}}).encode()
+            if result["status"] == "timeout":
+                return 504, b'{"error":{"code":"worker_deadline"}}'
+            if result["exit_code"] != 0:
+                return 502, json.dumps({"error": {"code": "worker_failed", "exit_code": result["exit_code"]}}).encode()
             try:
-                return 200, finalize_container_response(job, stdout)
+                return 200, finalize_container_response(job, result["stdout"].encode("utf-8"))
             except (TypeError, ValueError, UnicodeError, json.JSONDecodeError):
                 return 502, b'{"error":{"code":"invalid_worker_response"}}'
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait(timeout=5)
-            return 504, b'{"error":{"code":"worker_deadline"}}'
+        except (OSError, subprocess.SubprocessError):
+            return 503, b'{"error":{"code":"worker_unavailable"}}'
         finally:
-            self.cleanup(job_id)
+            try:
+                cleaned = self.cleanup(job_id)
+            except (OSError, subprocess.SubprocessError):
+                cleaned = False
+            if not cleaned:
+                return 503, b'{"error":{"code":"worker_cleanup_failed"}}'
 
     def cleanup(self, job_id: str) -> bool:
         name = self.container_name(job_id)

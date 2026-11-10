@@ -35,6 +35,8 @@ class AssessmentService:
         policy_version: str = "core-v1",
         correlation_id: str = "",
         rubric: Mapping[str, float] | None = None,
+        *,
+        required_concepts: tuple[str, ...] = (),
     ) -> dict:
         normalized_tests = [case.model_dump(mode="json") if hasattr(case, "model_dump") else dict(case) if isinstance(case, dict) else vars(case) for case in tests]
         request_payload = {
@@ -42,6 +44,7 @@ class AssessmentService:
             "reference_source": reference_source, "tests": normalized_tests,
             "policy_version": policy_version, "rubric": dict(rubric or {}),
             "graph_version": self.graph.version if self.graph else None,
+            "required_concepts": sorted(set(required_concepts)),
         }
         request_hash = hashlib.sha256(json.dumps(request_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         if self.repository is not None:
@@ -56,6 +59,7 @@ class AssessmentService:
             source,
             reference_source,
             self.graph,
+            required_concepts=required_concepts,
             tests=tests,
             rubric=rubric or {},
             policy_version=policy_version,

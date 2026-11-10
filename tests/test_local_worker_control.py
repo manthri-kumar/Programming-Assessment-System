@@ -95,7 +95,7 @@ def test_control_configuration_and_podman_command_are_server_owned(tmp_path):
     config.validate()
     command = PodmanEngine(config).command("a" * 32, "java")
     joined = " ".join(str(value) for value in command)
-    for required in ("--pull never", "--network none", "--ipc private", "--read-only", "--cap-drop ALL", "no-new-privileges", "--pids-limit 64", "--memory 536870912", "--memory-swap 536870912", "--cpus 1", "nofile=64:64", "fsize=16777216:16777216", "mode=1770,uid=65532,gid=65532", "--log-driver none", "--user 65532:65532", f"{config.image}@{DIGEST}"):
+    for required in ("--interactive", "--pull never", "--network none", "--ipc private", "--read-only", "--cap-drop ALL", "no-new-privileges", "--pids-limit 64", "--memory 536870912", "--memory-swap 536870912", "--cpus 1", "nofile=64:64", "fsize=16777216:16777216", "mode=1770,uid=65532,gid=65532", "--log-driver none", "--user 65532:65532", f"{config.image}@{DIGEST}"):
         assert required in joined
     assert "--volume" not in command and "--mount" not in command and "docker.sock" not in joined
 
@@ -135,3 +135,66 @@ def test_checked_in_worker_configuration_cannot_enable_execution():
     assert client["image_digest"].startswith("REPLACE_")
     assert toolchains["base_image_digest"] is None
     assert toolchains["verification_status"].endswith("not-yet-built-or-inspected")
+
+
+@pytest.mark.parametrize("exit_code", [1, -9])
+def test_control_plane_never_grades_matching_output_after_nonzero_exit_as_pass(exit_code):
+    job = {"id": "a" * 32, "tests": [{"id": "case", "expected_output": "1", "weight": 1}]}
+    response = {"job_id": job["id"], "outcomes": [{"case_id": "case", "status": "completed", "stdout": "1", "stderr": "", "exit_code": exit_code}]}
+    actual = json.loads(finalize_container_response(job, json.dumps(response).encode()))
+    assert actual["outcomes"][0]["status"] == "runtime_error"
+
+
+@pytest.mark.parametrize("exit_code", [None, True, "0"])
+def test_control_plane_rejects_unproven_success_exit_code(exit_code):
+    job = {"id": "a" * 32, "tests": [{"id": "case", "expected_output": "1", "weight": 1}]}
+    response = {"job_id": job["id"], "outcomes": [{"case_id": "case", "status": "completed", "stdout": "1", "stderr": "", "exit_code": exit_code}]}
+    with pytest.raises(ValueError, match="exit code"):
+        finalize_container_response(job, json.dumps(response).encode())
+
+
+@pytest.mark.parametrize("rootless,cgroups,controllers", [(False, "v2", ["cpu", "memory", "pids"]), (True, "v1", ["cpu", "memory", "pids"]), (True, "v2", ["cpu"])])
+def test_worker_readiness_requires_rootless_delegated_resource_controls(monkeypatch, rootless, cgroups, controllers):
+    from types import SimpleNamespace
+    response = {"host": {"security": {"rootless": rootless}, "cgroupVersion": cgroups, "cgroupControllers": controllers}}
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(response).encode())
+    monkeypatch.setattr("worker.control_service.subprocess.run", run)
+    engine = PodmanEngine(SimpleNamespace(podman="/usr/bin/podman"))
+    assert engine.inspect() == (False, {})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("capture_status,http_status,code", [("timeout", 504, "worker_deadline"), ("resource_limit", 502, "worker_response_too_large")])
+def test_control_capture_is_bounded_and_always_requests_cleanup(monkeypatch, capture_status, http_status, code):
+    from types import SimpleNamespace
+    engine = PodmanEngine(SimpleNamespace())
+    monkeypatch.setattr(engine, "inspect", lambda: (True, {}))
+    monkeypatch.setattr(engine, "command", lambda *args: ("/usr/bin/podman", "run", "--interactive"))
+    captured, cleaned = [], []
+    def capture(command, workspace, stdin, timeout, output_limit, **kwargs):
+        captured.append((stdin, timeout, output_limit))
+        return {"status": capture_status, "stdout": "", "stderr": "", "exit_code": None}
+    monkeypatch.setattr("worker.control_service.capture_process", capture)
+    monkeypatch.setattr(engine, "cleanup", lambda job_id: cleaned.append(job_id) or True)
+    job = {"id": "a" * 32, "language": "python", "source": "print(1)", "tests": [{"id": "case", "input": "", "expected_output": "secret", "weight": 1}]}
+    status, payload = engine.execute(json.dumps(job).encode())
+    assert status == http_status and json.loads(payload)["error"]["code"] == code
+    assert captured[0][1:] == (125, 8 * 1024 * 1024)
+    assert "secret" not in captured[0][0]
+    assert cleaned == [job["id"]]
+
+
+def test_control_never_returns_scores_when_cleanup_fails(monkeypatch):
+    from types import SimpleNamespace
+    engine = PodmanEngine(SimpleNamespace())
+    monkeypatch.setattr(engine, "inspect", lambda: (True, {}))
+    monkeypatch.setattr(engine, "command", lambda *args: ("/usr/bin/podman",))
+    response = {"job_id": "a" * 32, "outcomes": [{"case_id": "case", "status": "completed", "stdout": "1", "stderr": "", "exit_code": 0}]}
+    monkeypatch.setattr("worker.control_service.capture_process", lambda *args, **kwargs: {"status": "completed", "stdout": json.dumps(response), "exit_code": 0})
+    monkeypatch.setattr(engine, "cleanup", lambda job_id: False)
+    job = {"id": "a" * 32, "language": "python", "source": "print(1)", "tests": [{"id": "case", "input": "", "expected_output": "1", "weight": 1}]}
+    status, payload = engine.execute(json.dumps(job).encode())
+    assert status == 503 and json.loads(payload)["error"]["code"] == "worker_cleanup_failed"

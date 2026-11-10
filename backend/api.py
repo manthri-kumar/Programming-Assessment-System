@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import hashlib
 from copy import deepcopy
 from math import isfinite
 import uuid
@@ -32,8 +33,18 @@ EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def _audience_result(result: dict, role: str) -> dict:
     output = deepcopy(result)
-    if role != "teacher" and isinstance(output.get("report"), dict):
-        output["report"].pop("teacher_explanation", None)
+    if role != "teacher":
+        private_fields = {"teacher_explanation", "stdout", "stderr", "reference_source", "expected_output"}
+
+        def redact(value):
+            if isinstance(value, dict):
+                return {key: redact(item) for key, item in value.items()
+                        if key not in private_fields and not (key == "input" and "expected_output" in value)}
+            if isinstance(value, (list, tuple)):
+                return [redact(item) for item in value]
+            return value
+
+        output = redact(output)
     return output
 
 
@@ -428,9 +439,22 @@ def create_app(
         user: dict = Depends(teacher),
     ) -> dict:
         enforce_rate("import", f"teacher:{user['id']}")
-        content = await file.read(assignment_import_service.config.max_bytes + 1)
+        content = bytearray()
+        digest = hashlib.sha256()
         try:
-            return assignment_import_service.create(user["id"], file.filename or "upload", file.content_type or "application/octet-stream", content, idempotency_key)
+            while len(content) <= assignment_import_service.config.max_bytes:
+                remaining = assignment_import_service.config.max_bytes + 1 - len(content)
+                chunk = await file.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                content.extend(chunk)
+                digest.update(chunk)
+            if len(content) > assignment_import_service.config.max_bytes:
+                raise AssignmentImportError("upload_size_exceeded", "Upload exceeds configured size limit", 413)
+            return assignment_import_service.create(
+                user["id"], file.filename or "upload", file.content_type or "application/octet-stream",
+                bytes(content), idempotency_key, expected_hash=digest.hexdigest(),
+            )
         except AssignmentImportError as exc:
             audit_logger.emit(AuditEvent(http_request.state.request_id, "assignment_import", exc.code, details={"teacher_id": user["id"], "byte_size": len(content)}))
             raise import_failure(exc) from exc
@@ -472,16 +496,22 @@ def create_app(
     @app.post("/assignment-imports/{public_id}/confirm", status_code=201)
     async def confirm_assignment_import(public_id: str, request: AssignmentRequest, user: dict = Depends(teacher)) -> dict:
         try:
-            assignment_import_service._owned(public_id, user["id"])
+            imported = assignment_import_service._owned(public_id, user["id"])
             validated_tests = [AssessmentTestRequest.model_validate(item) for item in request.tests]
             known = set(service.graph.concepts if service.graph else ())
             unknown = sorted(({concept for case in validated_tests for concept in case.concept_ids} | set(request.concept_ids)) - known)
             if unknown: raise HTTPException(422, {"unknown_concepts": unknown})
             data = request.model_dump(); data["deadline"] = request.deadline.isoformat() if request.deadline else None
             data["rubric"] = request.rubric.model_dump(exclude_none=True); data["tests"] = [case.model_dump() for case in validated_tests]
-            assignment = repository.confirm_assignment_import(public_id, user["id"], data)
+            assignment_import_service.validate_confirmation(imported, data)
+            assignment = repository.confirm_assignment_import(public_id, user["id"], data, expected_draft=imported["draft"])
+            assignment_import_service.discard_confirmed_source(public_id, user["id"])
             return {key: value for key, value in assignment.items() if key not in {"reference_source", "tests"}}
         except AssignmentImportError as exc: raise import_failure(exc) from exc
+        except PydanticValidationError as exc:
+            raise HTTPException(422, "Invalid imported test-case fields") from exc
+        except RepositoryError as exc:
+            raise HTTPException(409, "Import changed during confirmation; reload and retry") from exc
 
     @app.post("/assignments", status_code=201)
     async def create_assignment(request: AssignmentRequest, user: dict = Depends(teacher)) -> dict:
@@ -575,29 +605,51 @@ def create_app(
             return _audience_result(existing_evaluation["result"], user["role"])
         claimed = repository.claim_evaluation_job(job["job_id"], http_request.state.request_id)
         if not claimed:
-            if existing_evaluation and job["state"] == "failed" and job["attempts"] >= job["max_attempts"]:
-                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=_audience_result(existing_evaluation["result"], user["role"]))
+            if job["state"] == "failed" and job["attempts"] >= job["max_attempts"]:
+                detail = _audience_result(existing_evaluation["result"], user["role"]) if existing_evaluation else {
+                    "code": "evaluation_retry_exhausted", "message": "Evaluation could not complete after the allowed attempts. Contact your teacher.",
+                    "evaluation_job_id": job["job_id"], "retryable": False,
+                }
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
             raise HTTPException(409, "evaluation is already running, completed, or cancelled")
-        rubric = snapshot["rubric"]
-        result = service.assess(
-            submission["language"],
-            submission["source"],
-            snapshot["reference_source"],
-            tuple(snapshot["tests"]),
-            rubric.get("policy_version", "core-v1"),
-            http_request.state.request_id,
-            rubric.get("weights"),
-        )
-        result["evaluation_job_id"] = job["job_id"]
-        current_job = repository.get_evaluation_job(job["job_id"])
-        if current_job and current_job["state"] == "cancelled":
-            raise HTTPException(409, "evaluation was cancelled")
-        repository.save_evaluation(submission_id, result["policy_version"], result)
-        if result["status"] == "incomplete":
-            repository.fail_evaluation_job(job["job_id"], "worker-unavailable", retryable=True)
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=_audience_result(result, user["role"]))
-        repository.complete_evaluation_job(job["job_id"], result.get("assessment_record_id"))
-        return _audience_result(result, user["role"])
+        try:
+            rubric = snapshot["rubric"]
+            result = service.assess(
+                submission["language"],
+                submission["source"],
+                snapshot["reference_source"],
+                tuple(snapshot["tests"]),
+                rubric.get("policy_version", "core-v1"),
+                http_request.state.request_id,
+                rubric.get("weights"),
+                required_concepts=tuple(snapshot.get("concept_ids", [])),
+            )
+            result["evaluation_job_id"] = job["job_id"]
+            current_job = repository.get_evaluation_job(job["job_id"])
+            if current_job and current_job["state"] == "cancelled":
+                raise HTTPException(409, "evaluation was cancelled")
+            repository.save_evaluation(submission_id, result["policy_version"], result)
+            if result["status"] == "incomplete":
+                repository.fail_evaluation_job(job["job_id"], "worker-unavailable", retryable=True)
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=_audience_result(result, user["role"]))
+            repository.complete_evaluation_job(job["job_id"], result.get("assessment_record_id"))
+            return _audience_result(result, user["role"])
+        except HTTPException:
+            raise
+        except Exception as exc:
+            retryable = False
+            try:
+                current_job = repository.get_evaluation_job(job["job_id"])
+                if current_job and current_job["state"] == "running":
+                    failed = repository.fail_evaluation_job(job["job_id"], "internal", retryable=True)
+                    retryable = failed["attempts"] < failed["max_attempts"]
+            except Exception as recovery_error:
+                audit_logger.emit(AuditEvent(http_request.state.request_id, "evaluation_recovery_failed", "internal", details={"exception_type": type(recovery_error).__name__, "job_id": job["job_id"]}))
+            audit_logger.emit(AuditEvent(http_request.state.request_id, "evaluation_failed", "internal", details={"exception_type": type(exc).__name__, "job_id": job["job_id"]}))
+            raise HTTPException(503, {
+                "code": "evaluation_failed", "message": "Evaluation could not be completed. Retry if available, or contact your teacher.",
+                "evaluation_job_id": job["job_id"], "retryable": retryable,
+            }) from exc
 
     @app.get("/submissions/{submission_id}/evaluation")
     async def evaluation(submission_id: int, user: dict = Depends(current_user)) -> dict:

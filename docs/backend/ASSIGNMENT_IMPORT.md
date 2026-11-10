@@ -21,6 +21,7 @@ These are project-local Python dependencies. They do not install privileged soft
 | `CODEASSESS_IMPORT_MAX_DIMENSION` | `12000` | Maximum image width or height. |
 | `CODEASSESS_IMPORT_MAX_PIXELS` | `40000000` | Maximum decoded pixels. |
 | `CODEASSESS_IMPORT_RETENTION_HOURS` | `72` | Unpublished source retention. |
+| `CODEASSESS_IMPORT_AUDIT_RETENTION_DAYS` | `30` | Content-free deletion/expiry tombstone retention. |
 | `CODEASSESS_TESSERACT_PATH` | unset | Optional absolute local Tesseract-compatible executable. Unset means OCR unavailable. |
 | `CODEASSESS_TESSERACT_SHA256` | unset | Required approved SHA-256 pin whenever the executable path is set. |
 | `CODEASSESS_IMPORT_OCR_CONCURRENCY` | `2` | Maximum concurrent local OCR processes (1–8). |
@@ -31,11 +32,15 @@ Unsafe, relative, or out-of-root storage configuration fails closed. Original PD
 
 Uploads are treated as untrusted. The backend validates authorization, declared type, extension, magic signature, decoder/parser result, bytes, dimensions, pixels, pages, encryption, and unsupported active PDF features. Source files use random storage keys outside the web root. Temporary files are removed after success or failure. Expired unpublished imports are deleted on access/startup cleanup.
 
-Logs and API responses exclude document bytes, extracted faculty text, absolute storage paths, secrets, reference programs, and hidden tests. Students and unrelated teachers cannot access imports or provenance.
+Logs and API responses exclude document bytes, extracted faculty text, absolute storage paths, secrets, reference programs, and hidden tests. Students and unrelated teachers cannot access imports or provenance. Confirmation removes the private source file while retaining bounded owner-only provenance. Explicit deletion and expiry retain only a content-free tombstone (random import ID, owner ID, reason, media type, byte size, and timestamps) for the configured audit period.
+
+Audit events contain only bounded request/import identifiers, owner identifiers, byte counts, timings, lifecycle categories, and safe reason codes. The shared structured logger redacts document content, extracted text, prompts, provider responses, filesystem paths and storage keys, source/reference code, hidden tests, credentials, tokens, cookies, and secrets recursively before serialization.
 
 ## Extraction providers
 
 Embedded PDF text extraction is built in. Images and scan-only pages require the local OCR adapter. The adapter is disabled unless `CODEASSESS_TESSERACT_PATH` names an approved absolute executable. This repository does not install Tesseract and never falls back to a cloud service. Handwriting accuracy is not claimed.
+
+The local adapter rejects relative executable paths before resolution and requires the configured SHA-256 pin. Each OCR stdout/stderr stream is bounded to 64,000 bytes during capture; overflow kills the process and returns `ocr_output_exceeded`, rather than silently accepting a truncated draft. Timeout/start failures use sanitized categories; raw stderr is discarded. Portable adapter tests intercept process creation and verify these controls without invoking OCR. They do not verify a real decoder, Windows process isolation, OCR accuracy, or process-tree behavior of any future provider that launches descendants; runtime activation still requires the separate approved-provider verification gate.
 
 ### Windows provisioning gate
 

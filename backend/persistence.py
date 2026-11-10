@@ -12,7 +12,14 @@ from typing import Iterator, Protocol
 from backend.reporting import replay_compatible_result
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
+
+ASSIGNMENT_IMPORT_TRANSITIONS = {
+    "validated": {"validated", "review-ready", "extraction-unavailable", "extraction-failed"},
+    "extraction-unavailable": {"extraction-unavailable", "extraction-failed", "review-ready"},
+    "extraction-failed": {"extraction-unavailable", "extraction-failed", "review-ready"},
+    "review-ready": {"review-ready", "extraction-unavailable", "extraction-failed"},
+}
 
 
 class RepositoryError(RuntimeError):
@@ -146,6 +153,11 @@ class SQLiteRepository:
               details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY(import_id) REFERENCES assignment_imports(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS assignment_import_tombstones(
+              public_id TEXT PRIMARY KEY, teacher_id INTEGER NOT NULL, reason TEXT NOT NULL,
+              media_type TEXT NOT NULL, byte_size INTEGER NOT NULL,
+              import_created_at TEXT NOT NULL, deleted_at TEXT NOT NULL, purge_after TEXT NOT NULL
+            );
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(assignments)")}
             additions = {
@@ -241,7 +253,7 @@ class SQLiteRepository:
         ).fetchall()
         return [{"event": row["event"], "details": json.loads(row["details_json"] or "{}"), "created_at": row["created_at"]} for row in rows]
 
-    def update_assignment_import(self, public_id: str, teacher_id: int, *, state: str | None = None, metadata: dict | None = None, extraction: dict | None = None, draft: dict | None = None, event: str = "updated") -> dict:
+    def update_assignment_import(self, public_id: str, teacher_id: int, *, state: str | None = None, metadata: dict | None = None, extraction: dict | None = None, draft: dict | None = None, event: str = "updated", expected_draft: dict | None = None) -> dict:
         fields: dict[str, object] = {"updated_at": datetime.now(timezone.utc).isoformat()}
         if state is not None: fields["state"] = state
         if metadata is not None: fields["metadata_json"] = json.dumps(metadata, sort_keys=True)
@@ -249,25 +261,56 @@ class SQLiteRepository:
         if draft is not None: fields["draft_json"] = json.dumps(draft, sort_keys=True)
         clause = ",".join(f"{key}=?" for key in fields)
         with self.transaction() as db:
-            cursor = db.execute(f"UPDATE assignment_imports SET {clause} WHERE public_id=? AND teacher_id=? AND assignment_id IS NULL", (*fields.values(), public_id, teacher_id))
-            if cursor.rowcount != 1:
+            current = db.execute(
+                "SELECT id,state,assignment_id,draft_json FROM assignment_imports WHERE public_id=? AND teacher_id=?",
+                (public_id, teacher_id),
+            ).fetchone()
+            if not current or current["assignment_id"] is not None:
                 raise RepositoryError("assignment import not found or already confirmed")
-            import_id = db.execute("SELECT id FROM assignment_imports WHERE public_id=?", (public_id,)).fetchone()["id"]
-            db.execute("INSERT INTO assignment_import_events(import_id,event,details_json) VALUES(?,?,?)", (import_id, event, "{}"))
+            if expected_draft is not None and json.loads(current["draft_json"]) != expected_draft:
+                raise RepositoryError("assignment import draft changed")
+            if state is not None and state not in ASSIGNMENT_IMPORT_TRANSITIONS.get(str(current["state"]), set()):
+                raise RepositoryError("invalid assignment import state transition")
+            db.execute(f"UPDATE assignment_imports SET {clause} WHERE id=?", (*fields.values(), current["id"]))
+            db.execute("INSERT INTO assignment_import_events(import_id,event,details_json) VALUES(?,?,?)", (current["id"], event, "{}"))
         item = self.get_assignment_import(public_id, teacher_id)
         assert item is not None
         return item
 
-    def delete_assignment_import(self, public_id: str, teacher_id: int) -> dict:
-        item = self.get_assignment_import(public_id, teacher_id)
-        if not item or item.get("assignment_id") is not None:
-            raise RepositoryError("assignment import not found or already confirmed")
+    def delete_assignment_import(self, public_id: str, teacher_id: int, *, reason: str = "owner-deleted", tombstone_days: int = 30) -> dict:
+        deleted_at = datetime.now(timezone.utc)
         with self.transaction() as db:
+            item = self.get_assignment_import(public_id, teacher_id)
+            if not item or item.get("assignment_id") is not None:
+                raise RepositoryError("assignment import not found or already confirmed")
+            db.execute(
+                "INSERT OR REPLACE INTO assignment_import_tombstones(public_id,teacher_id,reason,media_type,byte_size,import_created_at,deleted_at,purge_after) VALUES(?,?,?,?,?,?,?,?)",
+                (public_id, teacher_id, reason, item["media_type"], item["byte_size"], item["created_at"], deleted_at.isoformat(), (deleted_at + timedelta(days=tombstone_days)).isoformat()),
+            )
             db.execute("DELETE FROM assignment_import_events WHERE import_id=?", (item["id"],))
             db.execute("DELETE FROM assignment_imports WHERE id=?", (item["id"],))
         return item
 
-    def confirm_assignment_import(self, public_id: str, teacher_id: int, data: dict) -> dict:
+    def assignment_import_tombstones(self, teacher_id: int) -> list[dict]:
+        rows = self._connection.execute(
+            "SELECT public_id,reason,media_type,byte_size,import_created_at,deleted_at,purge_after FROM assignment_import_tombstones WHERE teacher_id=? ORDER BY deleted_at",
+            (teacher_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def purge_assignment_import_tombstones(self, now: datetime | None = None) -> int:
+        with self.transaction() as db:
+            cursor = db.execute("DELETE FROM assignment_import_tombstones WHERE purge_after<=?", ((now or datetime.now(timezone.utc)).isoformat(),))
+            return cursor.rowcount
+
+    def record_assignment_import_event(self, public_id: str, teacher_id: int, event: str) -> None:
+        with self.transaction() as db:
+            row = db.execute("SELECT id FROM assignment_imports WHERE public_id=? AND teacher_id=?", (public_id, teacher_id)).fetchone()
+            if not row:
+                raise RepositoryError("assignment import not found")
+            db.execute("INSERT INTO assignment_import_events(import_id,event,details_json) VALUES(?,?,?)", (row["id"], event, "{}"))
+
+    def confirm_assignment_import(self, public_id: str, teacher_id: int, data: dict, *, expected_draft: dict | None = None) -> dict:
         with self.transaction() as db:
             item = db.execute("SELECT * FROM assignment_imports WHERE public_id=? AND teacher_id=?", (public_id, teacher_id)).fetchone()
             if not item:
@@ -275,6 +318,10 @@ class SQLiteRepository:
             if item["assignment_id"] is not None:
                 assignment_id = int(item["assignment_id"])
             else:
+                if item["state"] != "review-ready":
+                    raise RepositoryError("assignment import is not ready for confirmation")
+                if expected_draft is not None and json.loads(item["draft_json"]) != expected_draft:
+                    raise RepositoryError("assignment import changed during confirmation")
                 local = db.execute("SELECT c.id FROM courses c JOIN institutions i ON i.id=c.institution_id WHERE i.code='local' AND c.code='local'").fetchone()
                 cursor = db.execute(
                     "INSERT INTO assignments(teacher_id,title,description,language,rubric_json,reference_source,tests_json,requirements,input_notes,output_notes,examples_json,constraints_text,concept_ids_json,deadline,course_id,available_from) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
